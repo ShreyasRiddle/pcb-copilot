@@ -12,7 +12,7 @@ import InputDrawer from "@/components/InputDrawer";
 const CircuitBoard3D = dynamic(() => import("@/components/CircuitBoard3D"), {
   ssr: false,
   loading: () => (
-    <div className="w-full h-full flex items-center justify-center bg-[#0a0a0f]">
+    <div style={{ position: "absolute", inset: 0, background: "#0a0a0f" }} className="flex items-center justify-center">
       <div className="text-zinc-600 text-sm animate-pulse">Initializing 3D scene…</div>
     </div>
   ),
@@ -23,7 +23,7 @@ export default function Home() {
   const { loading, status, components, traces, run } = useCircuitPipeline();
 
   return (
-    <main className="w-screen h-screen overflow-hidden relative bg-[#0a0a0f]">
+    <main style={{ background: "#0a0a0f" }} className="w-screen h-screen overflow-hidden relative">
       {/* Full-screen 3D canvas — hero layer */}
       <CircuitBoard3D
         components={components}

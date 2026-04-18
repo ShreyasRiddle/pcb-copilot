@@ -58,10 +58,10 @@ export default function CircuitBoard3D({
 
   return (
     <Canvas
-      shadows
+      shadows={{ type: THREE.PCFShadowMap }}
       camera={{ position: [0, 10, 12], fov: 42 }}
       gl={{ antialias: true, alpha: false }}
-      style={{ background: "#0a0a0f" }}
+      style={{ position: "absolute", inset: 0, background: "#0a0a0f" }}
       onPointerMissed={() => onSelect(null)}
     >
       <ambientLight intensity={0.4} />

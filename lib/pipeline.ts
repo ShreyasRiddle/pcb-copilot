@@ -107,8 +107,8 @@ Use exact types: resistor, capacitor_ceramic, capacitor_electrolytic, inductor, 
           max_tokens: 512,
           tools: [
             {
+              type: "web_search_20250305" as "web_search_20250305",
               name: "web_search",
-              type: "computer_20241022" as never,
             },
           ],
           messages: [
