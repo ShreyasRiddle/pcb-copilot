@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "app/api/design/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/export-bom/route.ts": {
+      "maxDuration": 10
+    }
+  }
+}

@@ -1,12 +1,11 @@
 import { NextRequest } from "next/server";
-import { DEMO_SCENE, DEMO_TRACES } from "@/lib/demoScene";
+import { DEMO_WIRING } from "@/lib/demoWiring";
 
-function sseEvent(data: object) {
+function sseEvent(data: object): string {
   return `data: ${JSON.stringify(data)}\n\n`;
 }
 
 export async function POST(req: NextRequest) {
-  // Streaming SSE response
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -17,51 +16,41 @@ export async function POST(req: NextRequest) {
 
       try {
         const { prompt, specs, pdfBase64 } = await req.json();
+        const apiKey = process.env.GEMINI_API_KEY;
 
-        // Check for API key
-        const apiKey = process.env.ANTHROPIC_API_KEY;
-
-        if (!apiKey || pdfBase64 === undefined) {
-          // Demo mode: stream fake progress then return demo scene
-          const steps = [
-            "Reading datasheet…",
-            "Extracting topology and design equations…",
-            "Calculating feedback resistors…",
-            "Solving inductor and capacitor values…",
-            "Sourcing R1 on Digikey…",
-            "Sourcing R2 on Digikey…",
-            "Sourcing L1 on Digikey…",
-            "Sourcing capacitors on Digikey…",
-            "Placing components on board…",
-            "Done.",
+        if (!apiKey) {
+          // Demo mode: no API key configured — stream fake progress then return hardcoded demo
+          const steps: Array<{ step: 1 | 2 | 3 | 4; message: string }> = [
+            { step: 1, message: "Reading datasheet…" },
+            { step: 1, message: "Extracting topology and design equations…" },
+            { step: 2, message: "Calculating feedback resistors…" },
+            { step: 2, message: "Solving inductor and capacitor values…" },
+            { step: 3, message: "Sourcing R1 on Digikey…" },
+            { step: 3, message: "Sourcing L1 on Digikey…" },
+            { step: 3, message: "Sourcing Cin, Cout, Cboot on Digikey…" },
+            { step: 4, message: "Building wiring diagram…" },
           ];
 
-          for (const message of steps) {
-            send({ type: "status", message });
-            await new Promise((r) => setTimeout(r, 600));
+          for (const s of steps) {
+            send({ type: "status", step: s.step, message: s.message });
+            await new Promise((r) => setTimeout(r, 500));
           }
 
-          send({
-            type: "result",
-            sceneGraph: DEMO_SCENE,
-            traces: DEMO_TRACES,
-          });
-
-          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-          controller.close();
-          return;
+          send({ type: "result", data: DEMO_WIRING });
+        } else {
+          // Real pipeline — runs whenever there is an API key.
+          // pdfBase64 may be undefined (text-only prompt path).
+          const { runPipeline } = await import("@/lib/pipeline");
+          await runPipeline({ prompt, specs, pdfBase64, apiKey, send });
         }
-
-        // Real AI pipeline — imported lazily to avoid issues when key is absent
-        const { runPipeline } = await import("@/lib/pipeline");
-        await runPipeline({ prompt, specs, pdfBase64, apiKey, send });
 
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Unknown error";
-        controller.enqueue(
-          encoder.encode(sseEvent({ type: "status", message: `Error: ${message}` }))
-        );
+        const message = err instanceof Error ? err.message : "Unknown pipeline error";
+        const send = (data: object) => {
+          controller.enqueue(encoder.encode(sseEvent(data)));
+        };
+        send({ type: "error", message });
       } finally {
         controller.close();
       }

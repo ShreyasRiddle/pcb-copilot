@@ -1,5 +1,18 @@
 @import "tailwindcss";
 
+:root {
+  --bg-base:    #0d0d12;
+  --bg-card:    #15151d;
+  --bg-input:   #1a1a24;
+  --border:     rgba(255, 255, 255, 0.07);
+  --border-mid: rgba(255, 255, 255, 0.12);
+  --text-1:     #f0f0f4;
+  --text-2:     #a0a0b0;
+  --text-3:     #606070;
+  --accent:     #6ee7f7;
+  --accent-dim: rgba(110, 231, 247, 0.12);
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -9,71 +22,158 @@
 html,
 body {
   width: 100%;
-  height: 100%;
-  overflow: hidden;
-  background: #0a0a0f;
-  color: #f0f0f0;
+  min-height: 100%;
+  background: var(--bg-base);
+  color: var(--text-1);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
-.glass {
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  background: rgba(15, 15, 25, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+/* ── Subtle dot-grid background ─────────────────────────────────────────── */
+
+body {
+  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 28px 28px;
+  background-attachment: fixed;
+}
+
+/* ── Typography ─────────────────────────────────────────────────────────── */
+
+h1, h2, h3 {
+  font-family: var(--font-space), system-ui, sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+h2 {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+h3 {
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+/* ── Card surface ───────────────────────────────────────────────────────── */
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   border-radius: 14px;
 }
 
-.glass-light {
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+.card-inset {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
   border-radius: 10px;
 }
 
-/* Worldspace annotation card */
-.annotation-card {
-  background: rgba(10, 10, 20, 0.85);
-  border: 1px solid rgba(0, 255, 200, 0.3);
-  border-radius: 8px;
-  padding: 8px 12px;
-  min-width: 140px;
-  pointer-events: none;
-  white-space: nowrap;
-}
+/* ── Section label ──────────────────────────────────────────────────────── */
 
-.annotation-card .label-type {
-  font-size: 10px;
-  color: #00ffc8;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin-bottom: 2px;
-}
-
-.annotation-card .label-value {
-  font-size: 14px;
+.section-label {
+  font-family: var(--font-space), system-ui, sans-serif;
+  font-size: 11px;
   font-weight: 600;
-  color: #ffffff;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3);
 }
 
-.annotation-card .label-reason {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.45);
-  margin-top: 3px;
-  white-space: normal;
-  max-width: 180px;
-  line-height: 1.3;
+/* ── Glass (SourcingPanel overlay) ─────────────────────────────────────── */
+
+.glass {
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  background: rgba(13, 13, 20, 0.85);
+  border: 1px solid var(--border-mid);
+  border-radius: 14px;
 }
 
-/* Scrollbar */
-::-webkit-scrollbar {
-  width: 4px;
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+
+.btn-primary {
+  background: var(--accent-dim);
+  border: 1px solid rgba(110, 231, 247, 0.3);
+  color: var(--accent);
+  border-radius: 10px;
+  font-family: var(--font-space), system-ui, sans-serif;
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
 }
-::-webkit-scrollbar-track {
+
+.btn-primary:hover {
+  background: rgba(110, 231, 247, 0.2);
+  border-color: rgba(110, 231, 247, 0.5);
+}
+
+.btn-primary:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.btn-ghost {
   background: transparent;
+  border: 1px solid var(--border-mid);
+  color: var(--text-2);
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease;
 }
+
+.btn-ghost:hover {
+  color: var(--text-1);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+/* ── Tab switcher ───────────────────────────────────────────────────────── */
+
+.tab-btn {
+  padding: 6px 16px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-family: var(--font-space), system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text-3);
+  background: transparent;
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
+}
+
+.tab-btn:hover {
+  color: var(--text-2);
+}
+
+.tab-btn.active {
+  color: var(--text-1);
+  background: var(--bg-card);
+  border-color: var(--border-mid);
+}
+
+/* ── Pulse animation ────────────────────────────────────────────────────── */
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.4; transform: scale(0.8); }
+}
+
+.pulse-dot {
+  animation: pulse-dot 1.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.1);
   border-radius: 4px;
 }
