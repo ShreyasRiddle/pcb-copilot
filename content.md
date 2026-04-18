@@ -35,8 +35,8 @@ Claude and GPT-4V can now ingest a PDF datasheet as a first-class input — not 
 **2. AI with tool use**
 Modern LLMs can call external APIs mid-reasoning. That means Claude can calculate a feedback resistor value, then immediately search Digikey for a matching part — in a single coherent pipeline without human handoff.
 
-**3. 3D rendering in the browser is now trivial**
-react-three-fiber brings Three.js into React. What used to require a dedicated CAD application now runs at 60fps in a browser tab, zero install required.
+**3. Interactive 2D diagrams are first-class browser citizens**
+SVG + React makes it trivial to build fully interactive wiring diagrams — hover states, animated connection highlights, and floating annotation tables — with no install and no 3D overhead. The result is faster, more legible, and easier to act on than a rendered board.
 
 These three capabilities didn't exist together 18 months ago. They do now.
 
@@ -48,9 +48,9 @@ PCB Copilot is a web application that takes a circuit description and an IC data
 
 - **Exact passive component values** — calculated from the datasheet's own design equations
 - **A sourced bill of materials** — real part numbers, real prices, real stock levels from Digikey
-- **An interactive 3D circuit board** — every component placed, clickable, and linked to purchase
+- **An interactive 2D wiring diagram** — every component placed as a block, every connection drawn as a colored wire, every node hoverable to reveal a live connection table
 
-**The 3D board is the interface.** Not a table. Not a form. You click a capacitor and see why it's 47µF, what it costs, and a direct link to buy it.
+**The wiring diagram is the interface.** Not a table. Not a form. You hover a component and instantly see every wire going in and out of it — labeled, color-coded, with gauge, length, and sourcing data. Hover a row in the connection table and that specific wire lights up on the diagram.
 
 ---
 
@@ -67,22 +67,23 @@ Claude takes the extracted equations and the user's operating conditions, then s
 **Step 3 — Parts Sourcer** *(parallel)*
 For every BOM item, Claude runs a web search query against Digikey. In parallel. It finds a real stocking part, extracts the part number, price, package, and buy URL — and flags anything backordered. No Digikey API key. No scraper. Claude reads the search results the way a human would.
 
-**Step 4 — Scene Graph Builder** *(algorithmic, no AI)*
-The enriched BOM is mapped to a 3D grid using a deterministic layout algorithm. No AI involved here — component positions are calculated, Manhattan traces are routed, and the scene graph is returned as JSON. Fast, predictable, repeatable.
+**Step 4 — Wiring Diagram Builder** *(algorithmic, no AI)*
+The enriched BOM is mapped to a 2D connection graph using a deterministic layout algorithm. No AI involved here — component blocks are positioned in a hierarchical left-to-right layout, connections are drawn as cubic-bezier SVG paths colored by net/signal type, and pin labels are placed at each endpoint. The output is a `WiringGraph` JSON object consumed directly by the frontend. Fast, predictable, repeatable.
 
 ---
 
 ## The Interface
 
-The 3D board is not a decorative afterthought. It is the primary interface.
+The 2D wiring diagram is not a decorative afterthought. It is the primary interface.
 
-- **Full-screen canvas** — the PCB occupies the entire viewport. No dashboard chrome, no sidebar competing for attention.
-- **Hover any component** — it glows. Bloom postprocessing makes the emissive highlight physically accurate.
-- **Click any component** — the camera smoothly orbits to face it. A floating annotation card appears at the component's 3D position showing value and design rationale. A sourcing panel slides in from the right showing the real Digikey part, price, and a buy button.
-- **Animated traces** — copper-colored dashes flow along the circuit paths suggesting current direction.
-- **OrbitControls** — drag to rotate, scroll to zoom, right-click to pan. The board is explorable.
+- **Full-viewport SVG canvas** — component blocks arranged in a clean hierarchical layout on a dark background. No dashboard chrome competing for attention.
+- **Hover any component block** — all wires connected to that component illuminate. A connection table slides in below (or as an overlay) listing every net: Code, Label, From, To, AWG, Color, Length. Unrelated wires dim to subordinate contrast.
+- **Hover any row in the connection table** — the corresponding wire on the diagram highlights with increased stroke weight and a glow effect, making it trivial to trace a specific signal across the board.
+- **Colored wires by signal type** — power rails, ground, signal lines, and data buses each get a distinct color (matching physical wire colors where relevant). Colors are consistent between the diagram and the table's Color column.
+- **Pin labels at endpoints** — each wire terminates at a labeled pin dot (P1, P3, P16, etc.) positioned at the component block edge, matching the physical connector pinout.
+- **Sourcing panel** — clicking any component or wire opens a right-rail panel with the Digikey part number, price, stock, and a direct buy link.
 
-Every design decision is spatially grounded. You understand the circuit by interacting with it — not by reading a table.
+Every connection is spatially grounded and table-verifiable. You understand the circuit by tracing wires — not by reading a standalone BOM.
 
 ---
 
@@ -111,9 +112,9 @@ Expected pipeline output:
 | Layer | Technology | Why |
 |-------|-----------|-----|
 | Frontend | Next.js 14, React 19, Tailwind v4 | App Router, RSC, fast iteration |
-| 3D Rendering | react-three-fiber, @react-three/drei | Declarative Three.js, `<Html>` worldspace |
-| Post-processing | @react-three/postprocessing | Bloom, depth of field |
-| Animations | Framer Motion | Spring-based panel transitions |
+| 2D Diagram | React + SVG (inline) | Zero-dependency wiring diagram; hover state, path animation, and pin labels via standard DOM events |
+| Wire routing | Cubic-bezier SVG paths | Smooth, readable curves between component blocks; no layout library needed |
+| Animations | Framer Motion | Spring-based panel transitions, wire highlight fade-in/out |
 | AI | Anthropic claude-sonnet-4-6 | PDF input, tool use, web search |
 | Streaming | Server-Sent Events (SSE) | Live pipeline status without WebSockets |
 | Deploy | Vercel | Edge-ready, env var management |
@@ -126,9 +127,9 @@ Expected pipeline output:
 
 **Tool use mid-pipeline** — parts sourcing uses Claude's `web_search` tool. The model decides what to search for, interprets the results, and extracts structured data — all without any Digikey API integration or custom scraper.
 
-**Streaming with real-time state** — the frontend opens a single SSE connection and receives typed events (`{ type: "status" }`, `{ type: "result" }`). The UI updates live as each pipeline step completes. The 3D scene rebuilds when the final result arrives.
+**Streaming with real-time state** — the frontend opens a single SSE connection and receives typed events (`{ type: "status" }`, `{ type: "result" }`). The UI updates live as each pipeline step completes. The wiring diagram rebuilds when the final `WiringGraph` arrives.
 
-**Deterministic layout, not AI layout** — component placement is algorithmic. This is intentional. AI-generated positions would be non-deterministic and hard to debug. The layout algorithm is fast, repeatable, and can be improved without touching the model.
+**Deterministic layout, not AI layout** — component placement and wire routing are algorithmic. This is intentional. AI-generated positions would be non-deterministic and hard to debug. The layout algorithm is fast, repeatable, and can be improved without touching the model.
 
 ---
 
@@ -136,16 +137,17 @@ Expected pipeline output:
 
 | Feature | Status |
 |---------|--------|
-| 3D canvas with full interaction | ✅ Working |
-| Demo scene (TPS563201, hardcoded) | ✅ Working |
 | SSE streaming pipeline | ✅ Working |
 | Claude datasheet parser (Step 1) | ✅ Built |
 | Claude design calculator (Step 2) | ✅ Built |
 | Claude parts sourcer (Step 3) | ✅ Built |
-| Algorithmic scene graph (Step 4) | ✅ Working |
+| 2D wiring diagram canvas | 🔲 Phase 2 |
+| Component hover → connection table | 🔲 Phase 2 |
+| Table row hover → wire highlight | 🔲 Phase 2 |
 | Real end-to-end AI pipeline | 🔲 Phase 2 |
+| Algorithmic WiringGraph builder (Step 4) | 🔲 Phase 2 |
 | BOM table + CSV export | 🔲 Phase 3 |
-| Assembly instructions panel | 🔲 Phase 3 |
+| Sourcing panel (click → Digikey link) | 🔲 Phase 3 |
 | Vercel deployment | 🔲 Phase 4 |
 
 ---
@@ -167,7 +169,7 @@ Buck converters are the demo. The architecture generalizes.
 
 Any IC with a datasheet — op-amps, motor drivers, RF transceivers, battery chargers, microcontrollers — follows the same pattern: a PDF with design equations, a set of user specs, and a list of required passives. The pipeline is identical.
 
-The longer-term vision: PCB Copilot becomes the interface layer between an engineer's intent and a manufacturable board. You describe what you want to build. The AI handles the translation — from spec to schematic to BOM to layout — and the 3D board is how you verify, explore, and order.
+The longer-term vision: PCB Copilot becomes the interface layer between an engineer's intent and a manufacturable board. You describe what you want to build. The AI handles the translation — from spec to schematic to BOM to layout — and the interactive wiring diagram is how you verify, trace, and order.
 
 The question isn't whether AI will change hardware design. It already is. The question is what the interface looks like.
 
@@ -185,4 +187,115 @@ cd pcb-copilot
 npm install
 cp .env.example .env.local  # add ANTHROPIC_API_KEY
 npm run dev                  # localhost:3000
+```
+
+---
+
+## Developer Split — Two-Person Workflow
+
+The codebase splits cleanly along the **AI backend / 2D frontend** boundary. The two tracks meet at a single typed interface: `WiringGraph` in `lib/types.ts`. Each person can develop and test independently — Person 2 uses a hardcoded `demoWiring.ts` fixture while Person 1's pipeline is in progress; the swap is a one-line change in the hook.
+
+---
+
+### Person 1 — AI Pipeline & Backend
+
+**Primary files:** `app/api/design/route.ts`, `lib/pipeline.ts`, `lib/buildWiringGraph.ts`, `hooks/useCircuitPipeline.ts`
+
+**Owns:**
+- Phase 2 — Real end-to-end AI pipeline
+  - Wire the four Claude steps together (`lib/pipeline.ts`)
+  - Build `lib/buildWiringGraph.ts` — the deterministic algorithm that converts the enriched BOM into a `WiringGraph`: component blocks with (x, y) positions, connection edges with pin labels, colors, AWG, and length
+  - Validate and normalize `WiringGraph` JSON before emitting via SSE
+  - Ensure Step 3 parallel tool-use calls resolve correctly; every connection gets a real part number, price, and URL
+- SSE streaming (`app/api/design/route.ts`)
+  - Emit `{ type: "status", step: 1|2|3|4, message: string }` events as each step completes
+  - Emit `{ type: "result", data: WiringGraph }` on success
+  - Emit `{ type: "error", message: string }` on failure
+  - Handle partial failures gracefully — backordered parts get `{ backordered: true }`, not dropped
+- Phase 3 backend
+  - `/api/export-bom` route — serialize BOM to CSV from `WiringGraph.nodes`
+- Phase 4
+  - Vercel env var setup, edge function audit, `.env.example`
+
+**Contract delivered to Person 2:**
+```ts
+// lib/types.ts (owned by P1, agreed with P2 before implementation)
+type WiringGraph = {
+  nodes: ComponentNode[]   // component blocks with position + BOM data
+  edges: ConnectionEdge[]  // wires with pin labels, color, AWG, length, backordered flag
+}
+type ComponentNode = {
+  id: string; label: string; x: number; y: number
+  bom?: { partNumber: string; price: number; url: string; backordered?: boolean }
+}
+type ConnectionEdge = {
+  id: string; code: string; label: string
+  from: string; fromPin: string; to: string; toPin: string
+  color: string; awg: number; lengthCm: number; backordered?: boolean
+}
+```
+
+---
+
+### Person 2 — 2D Wiring Diagram & UI
+
+**Primary files:** `components/WiringDiagram.tsx` *(new)*, `components/ConnectionTable.tsx` *(new)*, `components/SourcingPanel.tsx`, `components/InputDrawer.tsx`, `components/StatusBar.tsx`, `app/page.tsx`
+
+**Owns:**
+- Phase 2 — 2D interactive diagram
+  - `components/WiringDiagram.tsx` — full-viewport SVG canvas rendering `WiringGraph`:
+    - Component blocks as dark rounded-rect `<rect>` elements with white label text
+    - Connection wires as cubic-bezier `<path>` elements, stroked in the edge's `color` field
+    - Pin dots + labels (`P1`, `P16`, etc.) at each wire endpoint
+    - On component hover: dim all unrelated wires to 20% opacity, highlight connected wires to full stroke + glow filter; show `ConnectionTable` for that node
+    - On component blur: restore all wire opacity
+  - `components/ConnectionTable.tsx` — connection table rendered below (or as overlay on) the diagram:
+    - Columns: Code | Label | From | To | AWG | Color | Len
+    - On row hover: find the matching `<path>` by edge ID and apply increased stroke-width + CSS drop-shadow; remove on mouse-out
+    - Color swatch cell uses the wire's color value as a background dot
+  - Connect `hooks/useCircuitPipeline.ts` so diagram rebuilds when a real `WiringGraph` arrives (use `demoWiring.ts` fixture until P1 is ready)
+  - `StatusBar.tsx` — render live step labels from SSE status events
+- Phase 3 polish
+  - Sourcing panel — slide-in right-rail on component/wire click; Digikey part, price, stock, buy button
+  - BOM table panel — full component list with CSV download (calls `/api/export-bom` from P1)
+  - Backordered visual treatment — render backordered edges as dashed strokes with an amber color override; badge on component block
+- Phase 4
+  - Production build smoke test (`npm run build`, fix any SSR issues with SVG)
+  - `README.md` demo GIF
+
+**Contract consumed from Person 1:**
+- `WiringGraph` type as defined above — do not reshape without coordinating
+- SSE event shapes for `status`, `result`, `error`
+- All SSE parsing lives in `hooks/useCircuitPipeline.ts` — diagram components receive only the parsed `WiringGraph`
+
+---
+
+### Shared / Coordinate Together
+
+| Task | Notes |
+|------|-------|
+| `lib/types.ts` | Agree on `WiringGraph`, `ComponentNode`, `ConnectionEdge` shapes before either side codes against them |
+| Color vocabulary | The `color` field on `ConnectionEdge` must be a valid CSS color string — agree on format (hex vs named) |
+| Error states | Agree on `ErrorEvent` SSE payload shape so `StatusBar` can surface meaningful messages |
+| Final integration test | Run full pipeline with TPS563201 datasheet; verify diagram wires match expected BOM connections |
+
+---
+
+### Suggested Work Order
+
+```
+Week 1
+  P1: Wire pipeline steps 1–4; emit WiringGraph from buildWiringGraph.ts
+  P2: Build WiringDiagram.tsx + ConnectionTable.tsx against demoWiring.ts fixture
+
+Week 2
+  P1: Harden parts sourcer (backorder flags, retry); add /api/export-bom
+  P2: Wire hover → table, table row hover → wire highlight; connect live SSE hook
+
+Week 3
+  P1: Vercel config, env var audit, edge function review
+  P2: Sourcing panel, BOM panel + CSV download, backordered visual treatment
+
+Week 4 (buffer)
+  Both: Full end-to-end integration test, README, demo GIF, deploy to Vercel
 ```
