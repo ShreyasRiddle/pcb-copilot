@@ -1,19 +1,33 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import HardwareHubNav from "@/components/HardwareHubNav";
 import { useCognitoAuth } from "@/hooks/useCognitoAuth";
+import { stashHardwareHubPrefill } from "@/lib/hardwareHubPrefill";
 import type { HardwareProjectMeta } from "@/lib/hardwareTypes";
 
 export default function HardwareExplorePage() {
   const { getIdToken, configured } = useCognitoAuth();
+  const router = useRouter();
   const [publicProjects, setPublicProjects] = useState<HardwareProjectMeta[]>([]);
   const [mine, setMine] = useState<HardwareProjectMeta[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<"stars" | "newest" | "title">("stars");
+
+  const handleLoadDemo = useCallback(() => {
+    stashHardwareHubPrefill({
+      title: "TPS563201 Buck Converter — 12V → 5V 2A",
+      description:
+        "Synchronous step-down converter using TI TPS563201. 12V input, 5V/2A output at 500kHz. Includes input/output decoupling, bootstrap cap, and feedback divider.",
+      readmeMarkdown:
+        "## TPS563201 Buck Converter\n\n**Specs:** 12V → 5V, 2A, 500kHz\n\n### BOM\n| Ref | Value |\n|-----|-------|\n| U1 | TPS563201DDCR |\n| Cin | 10µF 25V |\n| Cout | 47µF 10V |\n| L1 | 4.7µH 3A |\n| R1 | 100kΩ |\n| R2 | 22.1kΩ |\n| Cboot | 100nF |\n",
+    });
+    router.push("/hardware/new?prefill=1");
+  }, [router]);
 
   const filteredPublic = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -109,6 +123,65 @@ export default function HardwareExplorePage() {
               </p>
             )}
           </header>
+
+          {/* ── Upload CTA ──────────────────────────────────────────────── */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              flexWrap: "wrap",
+              gap: 16,
+              padding: "20px 24px",
+              borderRadius: 14,
+              border: "1px solid var(--border)",
+              background: "var(--bg-card)",
+              marginBottom: 36,
+            }}
+          >
+            <div>
+              <p
+                style={{
+                  fontFamily: "var(--font-space), system-ui, sans-serif",
+                  fontWeight: 600,
+                  fontSize: 15,
+                  color: "var(--text-1)",
+                  marginBottom: 4,
+                }}
+              >
+                Upload a KiCad schematic
+              </p>
+              <p style={{ fontSize: 13, color: "var(--text-3)", lineHeight: 1.5, maxWidth: 400 }}>
+                Zip your KiCad 6+ project and publish it. AI builds the BOM and wiring diagram automatically.
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+              <button
+                type="button"
+                className="btn-ghost"
+                style={{ padding: "7px 14px", fontSize: 13 }}
+                onClick={handleLoadDemo}
+              >
+                Load TPS563201 demo ↗
+              </button>
+              <Link
+                href="/hardware/new"
+                style={{
+                  padding: "7px 16px",
+                  borderRadius: 8,
+                  border: "1px solid rgba(110,231,247,0.35)",
+                  background: "rgba(110,231,247,0.12)",
+                  color: "var(--accent)",
+                  fontWeight: 600,
+                  fontSize: 13,
+                  textDecoration: "none",
+                  fontFamily: "var(--font-space), system-ui, sans-serif",
+                }}
+              >
+                Upload project →
+              </Link>
+            </div>
+          </div>
 
           {error && (
             <p style={{ color: "#f87171", marginBottom: 16, fontSize: 14 }}>

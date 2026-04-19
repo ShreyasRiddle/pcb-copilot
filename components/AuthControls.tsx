@@ -45,7 +45,7 @@ export default function AuthControls() {
   if (!mounted) {
     return (
       <span style={AUTH_PLACEHOLDER_STYLE} aria-busy="true">
-        …
+        ...
       </span>
     );
   }
@@ -54,7 +54,7 @@ export default function AuthControls() {
     return (
       <span
         style={AUTH_PLACEHOLDER_STYLE}
-        title="Set NEXT_PUBLIC_COGNITO_USE_HOSTED_UI=1 plus OIDC redirect URI, authority or pool id, client id, and Hosted UI domain. See .env.example."
+        title="Set NEXT_PUBLIC_COGNITO_USE_HOSTED_UI=1 plus OIDC redirect URI, authority or pool id, client id, and Hosted UI domain."
       >
         Hosted UI misconfigured
       </span>
@@ -75,14 +75,14 @@ export default function AuthControls() {
   if (loading) {
     return (
       <span style={AUTH_PLACEHOLDER_STYLE} aria-busy="true">
-        …
+        ...
       </span>
     );
   }
 
   if (email && !open) {
     return (
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span
           style={{
             fontSize: 12,
@@ -127,52 +127,51 @@ export default function AuthControls() {
 
   if (cognitoHostedUiReady() && !amplifyBypass && !email) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 8 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className="btn-ghost"
-            style={{ padding: "5px 12px", fontSize: 12 }}
-            onClick={() => {
-              setError(null);
-              setBusy(true);
-              signIn("", "")
-                .catch((e) => setError(e instanceof Error ? e.message : "Sign-in failed"))
-                .finally(() => setBusy(false));
-            }}
-            disabled={busy}
-          >
-            Sign in with Cognito
-          </button>
-          <button
-            type="button"
-            className="btn-ghost"
-            style={{ padding: "5px 12px", fontSize: 12 }}
-            onClick={() => {
-              setError(null);
-              setBusy(true);
-              signUp("", "")
-                .catch((e) => setError(e instanceof Error ? e.message : "Sign-up failed"))
-                .finally(() => setBusy(false));
-            }}
-            disabled={busy}
-          >
-            Create account
-          </button>
-        </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <button
+          type="button"
+          className="btn-ghost"
+          style={{ padding: "5px 12px", fontSize: 12 }}
+          onClick={() => {
+            setError(null);
+            setBusy(true);
+            signIn("", "")
+              .catch((e) => setError(e instanceof Error ? e.message : "Sign-in failed"))
+              .finally(() => setBusy(false));
+          }}
+          disabled={busy}
+        >
+          Sign in
+        </button>
+        <button
+          type="button"
+          className="btn-ghost"
+          style={{ padding: "5px 12px", fontSize: 12 }}
+          onClick={() => {
+            setError(null);
+            setBusy(true);
+            signUp("", "")
+              .catch((e) => setError(e instanceof Error ? e.message : "Sign-up failed"))
+              .finally(() => setBusy(false));
+          }}
+          disabled={busy}
+        >
+          Create account
+        </button>
         <button
           type="button"
           className="btn-ghost"
           style={{ padding: "4px 8px", fontSize: 11, color: "var(--text-3)" }}
+          title="Use this if Hosted UI shows login pages unavailable"
           onClick={() => {
             setPreferAmplifyBypass();
             window.location.reload();
           }}
         >
-          Use email & password instead (if Hosted UI shows “Login pages unavailable”)
+          Email &amp; password
         </button>
         {error ? (
-          <span style={{ fontSize: 11, color: "#f87171", width: "100%" }}>{error}</span>
+          <span style={{ fontSize: 11, color: "#f87171" }}>{error}</span>
         ) : null}
       </div>
     );
