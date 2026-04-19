@@ -19,6 +19,8 @@
 import { GoogleGenAI } from "@google/genai";
 import { WiringGraph } from "./types";
 import { buildWiringGraph } from "./buildWiringGraph";
+import { extractJson } from "./jsonExtract";
+import { sourcePartWithGemini } from "./sourceParts";
 
 const MODEL = "gemini-2.5-flash";
 
@@ -53,26 +55,6 @@ interface BOMItem {
   distributor?: string;
   inStock?: boolean;
   backordered?: boolean;
-}
-
-function extractJson<T>(text: string, fallback: T): T {
-  // Strip markdown code fences if present
-  const stripped = text.replace(/```(?:json)?[\s\S]*?```/g, (m) =>
-    m.replace(/```(?:json)?/g, "").replace(/```$/, "")
-  );
-  try {
-    return JSON.parse(stripped.trim()) as T;
-  } catch {
-    const arrMatch = stripped.match(/\[[\s\S]*\]/);
-    if (arrMatch) {
-      try { return JSON.parse(arrMatch[0]) as T; } catch { /* fall through */ }
-    }
-    const objMatch = stripped.match(/\{[\s\S]*\}/);
-    if (objMatch) {
-      try { return JSON.parse(objMatch[0]) as T; } catch { /* fall through */ }
-    }
-    return fallback;
-  }
 }
 
 /** Build a concise spec string if the user provided numbers */
@@ -302,47 +284,12 @@ Return ONLY raw JSON (no markdown, no code fences):
       });
 
       try {
-        const step3Res = await ai.models.generateContent({
-          model: MODEL,
-          contents: [
-            {
-              role: "user",
-              parts: [
-                {
-                  text: `Find a real, currently available part for this component.
-Component: ${item.value} — type: ${item.type.replace(/_/g, " ")}
-Application: ${item.reasoning ?? "general electronics"}
-
-Search distributors in this order: Digikey first, then Mouser, then LCSC, then Arrow.
-Return the FIRST distributor that has confirmed stock.
-
-Prefer parts with:
-- Confirmed in-stock availability
-- Common package (0402, 0603, SOT-23, SOIC, etc.)
-- Reasonable price for qty 1
-
-Return ONLY raw JSON (no markdown, no code fences):
-{"partNumber": "string", "price": "$X.XX", "url": "https://...", "distributor": "Digikey", "inStock": true}
-
-If all distributors are out of stock or you cannot find a suitable part:
-{"partNumber": "N/A", "price": "N/A", "url": "", "distributor": "none", "inStock": false}`,
-                },
-              ],
-            },
-          ],
-          config: {
-            tools: [{ googleSearch: {} }],
-          },
+        const sourcing = await sourcePartWithGemini(ai, {
+          id: item.id,
+          value: item.value,
+          type: item.type,
+          reasoning: item.reasoning,
         });
-
-        const step3Text = step3Res.text ?? "{}";
-        const sourcing = extractJson<{
-          partNumber?: string;
-          price?: string;
-          url?: string;
-          distributor?: string;
-          inStock?: boolean;
-        }>(step3Text, {});
 
         return {
           ...item,

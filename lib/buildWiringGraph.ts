@@ -222,6 +222,7 @@ export function buildWiringGraph(
       label,
       x: pos.x,
       y: pos.y,
+      reasoning: item.reasoning || undefined,
       bom: item.partNumber && item.partNumber !== "N/A"
         ? {
             partNumber: item.partNumber,

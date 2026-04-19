@@ -49,6 +49,8 @@ export interface ComponentNode {
   label: string;
   x: number;
   y: number;
+  /** AI-generated explanation of why this component exists and how its value was chosen */
+  reasoning?: string;
   bom?: {
     partNumber: string;
     price: string;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
+import { appendCircuitRunHistory } from "@/lib/circuitRunHistory";
 import { WiringGraph, SSEEvent, ClarificationQuestion } from "@/lib/types";
 import { DEMO_WIRING } from "@/lib/demoWiring";
 
@@ -9,6 +10,8 @@ interface PipelineState {
   step: 1 | 2 | 3 | 4 | null;
   status: string;
   wiringGraph: WiringGraph;
+  /** Last prompt used in run(), or prompt from a loaded saved design */
+  lastPrompt: string;
   /** True once data is available (including demo) */
   hasResult: boolean;
   /** True when showing the hardcoded demo circuit */
@@ -23,6 +26,7 @@ export function useCircuitPipeline() {
     step: null,
     status: "",
     wiringGraph: DEMO_WIRING,
+    lastPrompt: "",
     hasResult: true,
     isDemo: true,
     clarificationQuestions: null,
@@ -43,6 +47,7 @@ export function useCircuitPipeline() {
 
       setState((s) => ({
         ...s,
+        lastPrompt: prompt,
         loading: true,
         step: null,
         status: "Starting pipeline…",
@@ -84,6 +89,10 @@ export function useCircuitPipeline() {
                   status: event.message,
                 }));
               } else if (event.type === "result") {
+                appendCircuitRunHistory({
+                  prompt: lastPromptRef.current,
+                  wiringGraph: event.data,
+                });
                 setState((s) => ({
                   ...s,
                   wiringGraph: event.data,
@@ -150,5 +159,24 @@ export function useCircuitPipeline() {
     [run]
   );
 
-  return { ...state, run, runWithAnswers };
+  const loadDesign = useCallback(
+    (graph: WiringGraph, meta?: { prompt?: string }) => {
+      const p = meta?.prompt ?? "";
+      lastPromptRef.current = p;
+      setState((s) => ({
+        ...s,
+        wiringGraph: graph,
+        lastPrompt: p,
+        hasResult: true,
+        isDemo: false,
+        loading: false,
+        step: null,
+        status: "Design loaded.",
+        clarificationQuestions: null,
+      }));
+    },
+    []
+  );
+
+  return { ...state, run, runWithAnswers, loadDesign };
 }

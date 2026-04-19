@@ -5,18 +5,29 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "smoke:hardware": "echo '--- GET public projects' && curl -sS http://localhost:3000/api/hardware/projects?scope=public && echo && echo '--- GET diagnostics (404 if not dev / no ENABLE_HARDWARE_DIAGNOSTICS)' && curl -sS http://localhost:3000/api/hardware/diagnostics; echo"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
+    "@aws-sdk/client-cognito-identity-provider": "^3.1032.0",
+    "@aws-sdk/client-dynamodb": "^3.1032.0",
+    "@aws-sdk/client-s3": "^3.1032.0",
+    "@aws-sdk/lib-dynamodb": "^3.1032.0",
+    "@aws-sdk/s3-request-presigner": "^3.1032.0",
     "@google/genai": "^1.50.1",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.6.0",
     "@react-three/postprocessing": "^3.0.4",
+    "aws-amplify": "^6.16.4",
+    "aws-jwt-verify": "^5.1.1",
     "framer-motion": "^12.38.0",
+    "jszip": "^3.10.1",
     "next": "16.2.4",
+    "oidc-client-ts": "^3.5.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "react-oidc-context": "^3.3.1",
     "three": "^0.184.0"
   },
   "devDependencies": {

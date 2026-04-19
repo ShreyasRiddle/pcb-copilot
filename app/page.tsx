@@ -1,23 +1,105 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { ComponentNode } from "@/lib/types";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState, useCallback, useEffect, useMemo } from "react";
+import { ComponentNode, WiringGraph } from "@/lib/types";
+import {
+  listCircuitRunHistory,
+  subscribeCircuitRunHistory,
+  type CircuitRunHistoryEntry,
+} from "@/lib/circuitRunHistory";
+import { buildHardwareHubPrefill, stashHardwareHubPrefill } from "@/lib/hardwareHubPrefill";
 import { useCircuitPipeline } from "@/hooks/useCircuitPipeline";
+import { useCognitoAuth } from "@/hooks/useCognitoAuth";
+import CircuitHistorySidebar, {
+  CIRCUIT_HISTORY_RAIL_WIDTH_PX,
+} from "@/components/CircuitHistorySidebar";
 import InputForm from "@/components/InputForm";
 import WiringDiagram from "@/components/WiringDiagram";
 import BomTable from "@/components/BomTable";
 import SourcingPanel from "@/components/SourcingPanel";
 import StatusBar from "@/components/StatusBar";
 import ClarificationCard from "@/components/ClarificationCard";
+import AuthControls from "@/components/AuthControls";
+import SaveDesignDialog from "@/components/SaveDesignDialog";
+import SavedDesignsModal from "@/components/SavedDesignsModal";
 
 export default function Home() {
+  const router = useRouter();
+  const [historyTick, setHistoryTick] = useState(0);
+  const [wideLayout, setWideLayout] = useState(false);
+  const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 960px)");
+    const sync = () => setWideLayout(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  useEffect(() => {
+    return subscribeCircuitRunHistory(() => setHistoryTick((t) => t + 1));
+  }, []);
+
+  const historyEntries = useMemo(() => listCircuitRunHistory(), [historyTick]);
+
   const [selectedNode, setSelectedNode] = useState<ComponentNode | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [highlightedEdgeId, setHighlightedEdgeId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"bom" | "diagram">("diagram");
+  const [skidlState, setSkidlState] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [skidlMsg, setSkidlMsg] = useState<string>("");
+  const [skidlNetlist, setSkidlNetlist] = useState<string | null>(null);
 
-  const { loading, status, step, wiringGraph, hasResult, isDemo, clarificationQuestions, run, runWithAnswers } =
-    useCircuitPipeline();
+  const {
+    loading,
+    status,
+    step,
+    wiringGraph,
+    lastPrompt,
+    hasResult,
+    isDemo,
+    clarificationQuestions,
+    run,
+    runWithAnswers,
+    loadDesign,
+  } = useCircuitPipeline();
+
+  const { getIdToken, configured, email } = useCognitoAuth();
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [savedOpen, setSavedOpen] = useState(false);
+
+  const handleLoadSaved = useCallback(
+    (graph: WiringGraph, prompt: string) => {
+      setSelectedNode(null);
+      setHighlightedEdgeId(null);
+      setHoveredNodeId(null);
+      setSkidlState("idle");
+      setSkidlMsg("");
+      setSkidlNetlist(null);
+      loadDesign(graph, { prompt });
+    },
+    [loadDesign]
+  );
+
+  const handleHistorySelect = useCallback(
+    (entry: CircuitRunHistoryEntry) => {
+      handleLoadSaved(entry.wiringGraph, entry.prompt);
+    },
+    [handleLoadSaved]
+  );
+
+  const handlePublishToHub = useCallback(
+    (prompt: string) => {
+      stashHardwareHubPrefill(buildHardwareHubPrefill(prompt));
+      router.push("/hardware/new?prefill=1");
+    },
+    [router]
+  );
+
+  const canPublishHub = Boolean(configured && email);
 
   const handleRun = useCallback(
     (prompt: string, pdfBase64?: string) => {
@@ -49,6 +131,98 @@ export default function Home() {
       // silent fail
     }
   }, [wiringGraph]);
+
+  const downloadBlob = (content: string, filename: string, mime: string) => {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleSkidlExport = useCallback(async () => {
+    if (skidlState === "loading") return;
+    setSkidlState("loading");
+    setSkidlMsg("Generating SKiDL script…");
+    setSkidlNetlist(null);
+
+    try {
+      const res = await fetch("/api/export-skidl", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wiringGraph }),
+      });
+
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let gotResult = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        for (const line of chunk.split("\n")) {
+          if (!line.startsWith("data: ")) continue;
+          const raw = line.slice(6).trim();
+          if (!raw || raw === "[DONE]") continue;
+
+          try {
+            const event = JSON.parse(raw) as {
+              type: string;
+              message?: string;
+              script?: string;
+              netlist?: string;
+              error?: string;
+            };
+
+            if (event.type === "status" && event.message) {
+              setSkidlMsg(event.message);
+            } else if (event.type === "result") {
+              gotResult = true;
+
+              if (event.script) {
+                downloadBlob(event.script, "circuit_skidl.py", "text/x-python");
+              }
+
+              if (event.netlist) {
+                const netBytes = atob(event.netlist);
+                setSkidlNetlist(netBytes);
+              }
+
+              if (event.error) {
+                setSkidlMsg(event.error);
+                setSkidlState("error");
+              } else {
+                setSkidlMsg(event.netlist ? "ERC passed — .py + .net downloaded" : "Script downloaded");
+                setSkidlState("done");
+              }
+            }
+          } catch {
+            // non-JSON line
+          }
+        }
+      }
+
+      if (!gotResult) {
+        setSkidlState("error");
+        setSkidlMsg("Export failed — check console.");
+      }
+    } catch (err) {
+      setSkidlState("error");
+      setSkidlMsg(err instanceof Error ? err.message : "Export failed");
+    }
+  }, [wiringGraph, skidlState]);
+
+  const handleSkidlNetlistDownload = useCallback(() => {
+    if (skidlNetlist) {
+      downloadBlob(skidlNetlist, "circuit.net", "application/xml");
+    }
+  }, [skidlNetlist]);
 
   return (
     <>
@@ -96,8 +270,16 @@ export default function Home() {
           </span>
         </div>
 
-        {/* Nav links */}
-        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        {/* Auth + links */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <AuthControls />
+          <Link
+            href="/hardware"
+            className="btn-ghost"
+            style={{ padding: "5px 12px", textDecoration: "none", fontSize: 12 }}
+          >
+            Hardware hub
+          </Link>
           <a
             href="https://github.com"
             target="_blank"
@@ -112,7 +294,69 @@ export default function Home() {
 
       {/* ── Main content ────────────────────────────────────────────────── */}
       <main style={{ background: "var(--bg-base)", minHeight: "100vh", paddingTop: 52 }}>
-        <div style={{ maxWidth: 920, margin: "0 auto", padding: "64px 24px 80px" }}>
+        <div style={{ position: "relative" }}>
+            {!wideLayout ? (
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setHistoryDrawerOpen(true)}
+                style={{
+                  position: "fixed",
+                  left: 12,
+                  bottom: 56,
+                  zIndex: 40,
+                  padding: "10px 14px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: 10,
+                  border: "1px solid var(--border)",
+                  background: "rgba(13,13,18,0.92)",
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+                }}
+              >
+                History
+              </button>
+            ) : null}
+
+            {!wideLayout && historyDrawerOpen ? (
+              <div
+                role="presentation"
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  zIndex: 190,
+                  background: "rgba(0,0,0,0.55)",
+                  display: "flex",
+                  justifyContent: "flex-start",
+                  paddingTop: 52,
+                }}
+                onClick={() => setHistoryDrawerOpen(false)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setHistoryDrawerOpen(false);
+                }}
+              >
+                <div onClick={(e) => e.stopPropagation()}>
+                  <CircuitHistorySidebar
+                    variant="drawer"
+                    entries={historyEntries}
+                    onSelect={handleHistorySelect}
+                    onPublishPrompt={handlePublishToHub}
+                    canPublish={canPublishHub}
+                    publishHint="Sign in to publish a project to the Hardware hub."
+                    onCloseDrawer={() => setHistoryDrawerOpen(false)}
+                  />
+                </div>
+              </div>
+            ) : null}
+
+            <div
+              style={{
+                marginLeft: wideLayout ? CIRCUIT_HISTORY_RAIL_WIDTH_PX : 0,
+                minHeight: "calc(100vh - 52px)",
+                boxSizing: "border-box",
+              }}
+            >
+              <div style={{ maxWidth: 920, margin: "0 auto", padding: "64px 24px 80px" }}>
 
           {/* ── Hero ──────────────────────────────────────────────────── */}
           <header style={{ marginBottom: 52, textAlign: "center" }}>
@@ -273,29 +517,180 @@ export default function Home() {
                   </h2>
                 </div>
 
-                {/* Tab switcher */}
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 4,
-                    background: "var(--bg-input)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 10,
-                    padding: 4,
-                  }}
-                >
-                  <button
-                    className={`tab-btn${activeTab === "diagram" ? " active" : ""}`}
-                    onClick={() => setActiveTab("diagram")}
+                {/* Right-side controls: save + export + tab switcher */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      style={{ padding: "7px 12px", fontSize: 12 }}
+                      onClick={() => setSaveOpen(true)}
+                      title="Save the current wiring graph to your account (requires sign-in)"
+                    >
+                      Save design
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      style={{ padding: "7px 12px", fontSize: 12 }}
+                      onClick={() => setSavedOpen(true)}
+                      title="Open a previously saved design (requires sign-in)"
+                    >
+                      My designs
+                    </button>
+                    {!isDemo ? (
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        style={{ padding: "7px 12px", fontSize: 12 }}
+                        disabled={!canPublishHub}
+                        title={
+                          canPublishHub
+                            ? "Open Hardware hub new project (prefilled); you still upload a KiCad zip"
+                            : "Sign in to publish to the Hardware hub"
+                        }
+                        onClick={() => handlePublishToHub(lastPrompt)}
+                      >
+                        Publish to hub…
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {/* KiCad export button group */}
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <button
+                      onClick={handleSkidlExport}
+                      disabled={skidlState === "loading"}
+                      title={
+                        skidlState === "loading"
+                          ? skidlMsg
+                          : skidlState === "error"
+                          ? skidlMsg
+                          : "Generate SKiDL script with Gemini + ERC repair loop"
+                      }
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        padding: "7px 14px",
+                        borderRadius: 9,
+                        fontSize: 12,
+                        fontFamily: "var(--font-space), system-ui, sans-serif",
+                        fontWeight: 600,
+                        letterSpacing: "0.01em",
+                        border: skidlState === "error"
+                          ? "1px solid rgba(239,68,68,0.4)"
+                          : skidlState === "done"
+                          ? "1px solid rgba(34,197,94,0.4)"
+                          : "1px solid rgba(110,231,247,0.25)",
+                        background: skidlState === "error"
+                          ? "rgba(239,68,68,0.08)"
+                          : skidlState === "done"
+                          ? "rgba(34,197,94,0.08)"
+                          : "rgba(110,231,247,0.06)",
+                        color: skidlState === "error"
+                          ? "#f87171"
+                          : skidlState === "done"
+                          ? "#4ade80"
+                          : "var(--accent)",
+                        cursor: skidlState === "loading" ? "not-allowed" : "pointer",
+                        opacity: skidlState === "loading" ? 0.7 : 1,
+                        transition: "all 150ms ease",
+                      }}
+                    >
+                      {skidlState === "loading" ? (
+                        <>
+                          <span
+                            className="pulse-dot"
+                            style={{
+                              width: 7,
+                              height: 7,
+                              borderRadius: "50%",
+                              background: "var(--accent)",
+                              display: "inline-block",
+                            }}
+                          />
+                          {skidlMsg || "Working…"}
+                        </>
+                      ) : skidlState === "done" ? (
+                        <>
+                          <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                          .py downloaded
+                        </>
+                      ) : skidlState === "error" ? (
+                        <>
+                          <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+                            <circle cx={12} cy={12} r={10} /><path d="M12 8v4M12 16h.01" />
+                          </svg>
+                          ERC issues — retry
+                        </>
+                      ) : (
+                        <>
+                          <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="16 18 22 12 16 6" />
+                            <polyline points="8 6 2 12 8 18" />
+                          </svg>
+                          Export to KiCad
+                        </>
+                      )}
+                    </button>
+
+                    {/* Download .net separately when ERC passed */}
+                    {skidlNetlist && (
+                      <button
+                        onClick={handleSkidlNetlistDownload}
+                        title="Download KiCad netlist (.net) — import into PCBnew"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 5,
+                          padding: "7px 12px",
+                          borderRadius: 9,
+                          fontSize: 12,
+                          fontFamily: "var(--font-space), system-ui, sans-serif",
+                          fontWeight: 600,
+                          border: "1px solid rgba(34,197,94,0.4)",
+                          background: "rgba(34,197,94,0.08)",
+                          color: "#4ade80",
+                          cursor: "pointer",
+                          transition: "all 150ms ease",
+                        }}
+                      >
+                        <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1={12} y1={15} x2={12} y2={3} />
+                        </svg>
+                        .net
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Tab switcher */}
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 4,
+                      background: "var(--bg-input)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 10,
+                      padding: 4,
+                    }}
                   >
-                    Wiring Diagram
-                  </button>
-                  <button
-                    className={`tab-btn${activeTab === "bom" ? " active" : ""}`}
-                    onClick={() => setActiveTab("bom")}
-                  >
-                    Bill of Materials
-                  </button>
+                    <button
+                      className={`tab-btn${activeTab === "diagram" ? " active" : ""}`}
+                      onClick={() => setActiveTab("diagram")}
+                    >
+                      Wiring Diagram
+                    </button>
+                    <button
+                      className={`tab-btn${activeTab === "bom" ? " active" : ""}`}
+                      onClick={() => setActiveTab("bom")}
+                    >
+                      Bill of Materials
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -346,11 +741,55 @@ export default function Home() {
               )}
             </div>
           )}
+              </div>
+            </div>
         </div>
       </main>
 
+      {wideLayout ? (
+        <CircuitHistorySidebar
+          variant="rail"
+          entries={historyEntries}
+          onSelect={handleHistorySelect}
+          onPublishPrompt={handlePublishToHub}
+          canPublish={canPublishHub}
+          publishHint="Sign in to publish a project to the Hardware hub."
+        />
+      ) : null}
+
       {/* ── Sourcing panel — fixed right overlay ──────────────────────── */}
-      <SourcingPanel node={selectedNode} onClose={() => setSelectedNode(null)} />
+      <SaveDesignDialog
+        open={saveOpen}
+        onClose={() => setSaveOpen(false)}
+        wiringGraph={wiringGraph}
+        prompt={lastPrompt}
+        getIdToken={getIdToken}
+      />
+
+      <SavedDesignsModal
+        open={savedOpen}
+        onClose={() => setSavedOpen(false)}
+        getIdToken={getIdToken}
+        onLoad={handleLoadSaved}
+      />
+
+      <SourcingPanel
+        node={selectedNode}
+        onClose={() => setSelectedNode(null)}
+        circuitDescription={(() => {
+          const ic = wiringGraph.nodes.find((n) => n.label.includes("\n"));
+          const icLabel = ic ? ic.label.replace(/\n/g, " ") : "unknown IC";
+          const nodeCount = wiringGraph.nodes.length;
+          const edgeCount = wiringGraph.edges.length;
+          const nodeEdges = selectedNode
+            ? wiringGraph.edges.filter(
+                (e) => e.from === selectedNode.id || e.to === selectedNode.id
+              )
+            : [];
+          const nets = nodeEdges.map((e) => e.label).join(", ");
+          return `${nodeCount}-component circuit built around ${icLabel} with ${edgeCount} connections. This component (${selectedNode?.id ?? ""}) is connected to nets: ${nets || "none"}.`;
+        })()}
+      />
     </>
   );
 }
