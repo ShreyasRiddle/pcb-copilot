@@ -35,7 +35,30 @@ export default function InputDrawer({ onRun, loading }: InputDrawerProps) {
     reader.readAsDataURL(file);
   };
 
+  const [validationError, setValidationError] = useState<string | null>(null);
+
   const handleSubmit = () => {
+    const vin = parseFloat(specs.vin);
+    const vout = parseFloat(specs.vout);
+    const iout = parseFloat(specs.iout);
+
+    if (isNaN(vin) || isNaN(vout) || isNaN(iout)) {
+      setValidationError("All specs must be numbers.");
+      return;
+    }
+    if (vout >= vin) {
+      setValidationError("Vout must be less than Vin.");
+      return;
+    }
+    if (iout <= 0) {
+      setValidationError("Iout must be greater than 0.");
+      return;
+    }
+    if (vin <= 0) {
+      setValidationError("Vin must be greater than 0.");
+      return;
+    }
+    setValidationError(null);
     onRun(prompt, specs, pdfBase64);
     setOpen(false);
   };
@@ -109,6 +132,18 @@ export default function InputDrawer({ onRun, loading }: InputDrawerProps) {
                   </span>
                 </label>
               </div>
+
+              {validationError && (
+                <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                  {validationError}
+                </p>
+              )}
+
+              {!pdfBase64 && (
+                <p className="text-[10px] text-zinc-600">
+                  No PDF uploaded — will run in demo mode.
+                </p>
+              )}
 
               <button
                 onClick={handleSubmit}

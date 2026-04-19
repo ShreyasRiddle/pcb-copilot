@@ -1,12 +1,6 @@
-/**
- * Full AI pipeline — runs when ANTHROPIC_API_KEY is set and a PDF is uploaded.
- * Steps: 1) Parse datasheet, 2) Calculate design values, 3) Source parts, 4) Build scene graph
- */
-
 import Anthropic from "@anthropic-ai/sdk";
 import { SceneComponent } from "./types";
-import { DEMO_TRACES } from "./demoScene";
-import { buildSceneGraph } from "./buildSceneGraph";
+import { buildSceneGraph, buildTraces } from "./buildSceneGraph";
 
 interface PipelineArgs {
   prompt: string;
@@ -16,95 +10,129 @@ interface PipelineArgs {
   send: (data: object) => void;
 }
 
+/** Safely parse JSON from Claude's text — handles markdown code fences */
+function safeParseJSON<T>(text: string, fallback: T): T {
+  try {
+    // Strip markdown code fences if present
+    const cleaned = text.replace(/```(?:json)?\n?/g, "").trim();
+    // Extract first JSON object or array
+    const match = cleaned.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
+    if (match) return JSON.parse(match[0]) as T;
+  } catch {
+    // fall through
+  }
+  return fallback;
+}
+
 export async function runPipeline({ prompt, specs, pdfBase64, apiKey, send }: PipelineArgs) {
   const client = new Anthropic({ apiKey });
 
   // ── Step 1: Parse datasheet ──────────────────────────────────────────────
   send({ type: "status", message: "Reading datasheet…" });
 
-  const datasheetResult = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 2048,
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "document",
-            source: { type: "base64", media_type: "application/pdf", data: pdfBase64 },
-          } as Anthropic.DocumentBlockParam,
-          {
-            type: "text",
-            text: `Extract the following from this IC datasheet as JSON only (no markdown):
+  let datasheetData: { topology?: string; equations?: string[]; appCircuit?: string } = {
+    topology: "switching regulator",
+    equations: [],
+    appCircuit: "",
+  };
+
+  try {
+    const datasheetResult = await client.messages.create({
+      model: "claude-sonnet-4-5",
+      max_tokens: 2048,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "document",
+              source: { type: "base64", media_type: "application/pdf", data: pdfBase64 },
+            } as Anthropic.DocumentBlockParam,
+            {
+              type: "text",
+              text: `Extract from this IC datasheet as JSON only (no markdown, no explanation):
 {
-  "topology": "string (e.g. synchronous buck)",
-  "equations": ["list of design equations as strings"],
-  "pins": [{"name": "string", "number": number, "function": "string"}],
-  "appCircuit": "string describing the typical application circuit components"
+  "topology": "e.g. synchronous buck, LDO, boost",
+  "equations": ["list key design equations as plain strings"],
+  "appCircuit": "brief description of the typical application circuit and components needed"
 }
 
 User specs: Vin=${specs.vin}V, Vout=${specs.vout}V, Iout=${specs.iout}A`,
-          },
-        ],
-      },
-    ],
-  });
+            },
+          ],
+        },
+      ],
+    });
 
-  const datasheetText = datasheetResult.content[0].type === "text" ? datasheetResult.content[0].text : "{}";
-  let datasheetData: { topology?: string; equations?: string[] } = {};
-  try {
-    datasheetData = JSON.parse(datasheetText);
-  } catch {
-    datasheetData = { topology: "buck converter", equations: [] };
+    const text = datasheetResult.content[0].type === "text" ? datasheetResult.content[0].text : "";
+    datasheetData = safeParseJSON(text, datasheetData);
+  } catch (err) {
+    send({ type: "status", message: "Datasheet parse warning — using defaults…" });
   }
 
   // ── Step 2: Calculate component values ────────────────────────────────────
   send({ type: "status", message: "Calculating component values…" });
 
-  const calcResult = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 2048,
-    messages: [
-      {
-        role: "user",
-        content: `Given this ${datasheetData.topology || "buck converter"} with specs Vin=${specs.vin}V, Vout=${specs.vout}V, Iout=${specs.iout}A, fsw=500kHz:
+  type BOMItem = { id: string; type: string; value: string; reasoning: string };
+  let bomItems: BOMItem[] = [];
 
-Design equations: ${JSON.stringify(datasheetData.equations || [])}
+  try {
+    const calcResult = await client.messages.create({
+      model: "claude-sonnet-4-5",
+      max_tokens: 2048,
+      messages: [
+        {
+          role: "user",
+          content: `You are a circuit design engineer. Given a ${datasheetData.topology || "switching regulator"} with:
+- Vin = ${specs.vin}V, Vout = ${specs.vout}V, Iout = ${specs.iout}A, fsw = 500kHz
+- Design equations: ${JSON.stringify(datasheetData.equations)}
+- Application circuit notes: ${datasheetData.appCircuit}
 
-Calculate all required passive component values. Return ONLY a JSON array:
+Calculate ALL required passive component values. Return ONLY a JSON array, no markdown:
 [
-  {"id": "R1", "type": "resistor", "value": "100kΩ", "reasoning": "upper feedback divider"},
-  {"id": "R2", "type": "resistor", "value": "22.1kΩ", "reasoning": "lower feedback divider, Vout = Vref*(1+R1/R2)"},
-  {"id": "L1", "type": "inductor", "value": "4.7µH", "reasoning": "output inductor at 500kHz"},
-  {"id": "Cin", "type": "capacitor_ceramic", "value": "10µF", "reasoning": "input decoupling"},
-  {"id": "Cout", "type": "capacitor_ceramic", "value": "47µF", "reasoning": "output filter"},
+  {"id": "U1", "type": "ic", "value": "<IC name>", "reasoning": "main controller"},
+  {"id": "R1", "type": "resistor", "value": "100kΩ", "reasoning": "upper feedback resistor — Vout = Vref*(1+R1/R2)"},
+  {"id": "R2", "type": "resistor", "value": "22.1kΩ", "reasoning": "lower feedback resistor"},
+  {"id": "L1", "type": "inductor", "value": "4.7µH", "reasoning": "output inductor — L=(Vin-Vout)/(ΔIL*fsw)"},
+  {"id": "Cin", "type": "capacitor_ceramic", "value": "10µF 25V", "reasoning": "input decoupling"},
+  {"id": "Cout", "type": "capacitor_ceramic", "value": "47µF 10V", "reasoning": "output filter"},
   {"id": "Cboot", "type": "capacitor_ceramic", "value": "100nF", "reasoning": "bootstrap cap"}
 ]
 
-Use exact types: resistor, capacitor_ceramic, capacitor_electrolytic, inductor, ic`,
-      },
-    ],
-  });
+Valid types: resistor, capacitor_ceramic, capacitor_electrolytic, inductor, ic
+Include the IC itself as the first item with type "ic".`,
+        },
+      ],
+    });
 
-  const calcText = calcResult.content[0].type === "text" ? calcResult.content[0].text : "[]";
-  let bomItems: Array<{ id: string; type: string; value: string; reasoning: string }> = [];
-  try {
-    const match = calcText.match(/\[[\s\S]*\]/);
-    if (match) bomItems = JSON.parse(match[0]);
-  } catch {
-    bomItems = [];
+    const text = calcResult.content[0].type === "text" ? calcResult.content[0].text : "[]";
+    bomItems = safeParseJSON<BOMItem[]>(text, []);
+  } catch (err) {
+    send({ type: "status", message: "Calculation error — using estimated values…" });
+    // Fallback BOM based on specs
+    bomItems = [
+      { id: "U1",    type: "ic",               value: "IC",      reasoning: "Main controller" },
+      { id: "L1",    type: "inductor",          value: "4.7µH",  reasoning: "Output inductor" },
+      { id: "Cin",   type: "capacitor_ceramic", value: "10µF",   reasoning: "Input decoupling" },
+      { id: "Cout",  type: "capacitor_ceramic", value: "47µF",   reasoning: "Output filter" },
+      { id: "R1",    type: "resistor",          value: "100kΩ",  reasoning: "Upper feedback" },
+      { id: "R2",    type: "resistor",          value: "22.1kΩ", reasoning: "Lower feedback" },
+      { id: "Cboot", type: "capacitor_ceramic", value: "100nF",  reasoning: "Bootstrap cap" },
+    ];
   }
 
   // ── Step 3: Source parts (parallel) ───────────────────────────────────────
-  send({ type: "status", message: "Sourcing parts on Digikey…" });
+  send({ type: "status", message: `Sourcing ${bomItems.length} parts on Digikey…` });
+
+  type SourcingData = { partNumber?: string; price?: string; url?: string; inStock?: boolean; distributor?: string; package?: string };
 
   const sourced = await Promise.all(
-    bomItems.map(async (item) => {
-      send({ type: "status", message: `Sourcing ${item.id} (${item.value})…` });
+    bomItems.map(async (item): Promise<BOMItem & SourcingData> => {
+      send({ type: "status", message: `Sourcing ${item.id} — ${item.value}…` });
       try {
         const res = await client.messages.create({
-          model: "claude-sonnet-4-6",
-          max_tokens: 512,
+          model: "claude-sonnet-4-5",
+          max_tokens: 1024,
           tools: [
             {
               type: "web_search_20250305" as "web_search_20250305",
@@ -114,25 +142,61 @@ Use exact types: resistor, capacitor_ceramic, capacitor_electrolytic, inductor, 
           messages: [
             {
               role: "user",
-              content: `Find a real Digikey part for: ${item.value} ${item.type.replace("_", " ")} for a ${specs.vout}V/${specs.iout}A buck converter. Return JSON only:
-{"partNumber": "string", "price": "$X.XX", "url": "https://digikey.com/...", "inStock": true, "distributor": "Digikey", "package": "string"}`,
+              content: `Search Digikey for a real in-stock part: "${item.value} ${item.type.replace(/_/g, " ")}" suitable for a ${specs.vout}V/${specs.iout}A power supply.
+
+Return ONLY this JSON, no other text:
+{"partNumber":"string","price":"$X.XX","url":"https://www.digikey.com/...","inStock":true,"distributor":"Digikey","package":"string"}`,
             },
           ],
         });
 
-        const text = res.content.find((c) => c.type === "text")?.text || "{}";
-        const match = text.match(/\{[\s\S]*\}/);
-        return { ...item, ...(match ? JSON.parse(match[0]) : {}) };
+        const textBlock = res.content.find((c) => c.type === "text");
+        const text = textBlock?.type === "text" ? textBlock.text : "{}";
+        const sourcing = safeParseJSON<SourcingData>(text, {});
+        return { ...item, ...sourcing };
       } catch {
-        return item;
+        return item; // Return without sourcing if it fails
       }
     })
   );
 
-  // ── Step 4: Build scene graph (algorithmic) ───────────────────────────────
+  // ── Step 4: Build scene graph ─────────────────────────────────────────────
   send({ type: "status", message: "Placing components on board…" });
-  const sceneGraph = buildSceneGraph(sourced as SceneComponent[]);
+  const sceneGraph = buildSceneGraph(sourced as Partial<SceneComponent>[]);
+  const traces = buildTraces(sceneGraph);
+
+  // ── Step 5: Assembly instructions ────────────────────────────────────────
+  send({ type: "status", message: "Generating assembly instructions…" });
+
+  let assemblySteps: { stepNumber: number; instruction: string; componentId: string }[] = [];
+
+  try {
+    const assemblyResult = await client.messages.create({
+      model: "claude-sonnet-4-5",
+      max_tokens: 1024,
+      messages: [
+        {
+          role: "user",
+          content: `Given this BOM for a ${datasheetData.topology || "circuit"}: ${JSON.stringify(
+            sceneGraph.map((c) => ({ id: c.id, value: c.value, type: c.type }))
+          )}
+
+Generate ordered PCB assembly steps. Return ONLY a JSON array, no markdown:
+[
+  {"stepNumber": 1, "instruction": "Place and solder U1 (IC) first — it sets the alignment for all other components", "componentId": "U1"},
+  {"stepNumber": 2, "instruction": "Solder R1 and R2 feedback resistors — these set the output voltage", "componentId": "R1"},
+  ...
+]`,
+        },
+      ],
+    });
+
+    const text = assemblyResult.content[0].type === "text" ? assemblyResult.content[0].text : "[]";
+    assemblySteps = safeParseJSON(text, []);
+  } catch {
+    // Non-critical — skip assembly steps if it fails
+  }
 
   send({ type: "status", message: "Done." });
-  send({ type: "result", sceneGraph, traces: DEMO_TRACES });
+  send({ type: "result", sceneGraph, traces, assemblySteps });
 }

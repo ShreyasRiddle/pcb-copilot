@@ -104,3 +104,13 @@ export const DEMO_TRACES: [string, string][] = [
   ["Cin", "U1"],
   ["R2", "Cout"],
 ];
+
+export const DEMO_ASSEMBLY = [
+  { stepNumber: 1, instruction: "Place and solder U1 (TPS563201) — align pin 1 marker, reflow all 6 pads.", componentId: "U1" },
+  { stepNumber: 2, instruction: "Solder Cin (10µF input cap) close to the VIN pin to minimise input impedance.", componentId: "Cin" },
+  { stepNumber: 3, instruction: "Solder Cboot (100nF bootstrap cap) between BOOT and SW pins.", componentId: "Cboot" },
+  { stepNumber: 4, instruction: "Solder L1 (4.7µH inductor) on the switch node — keep trace to SW pin short.", componentId: "L1" },
+  { stepNumber: 5, instruction: "Solder Cout (47µF output cap) at the inductor output node.", componentId: "Cout" },
+  { stepNumber: 6, instruction: "Solder R1 (100kΩ) — upper feedback resistor from Vout to FB pin.", componentId: "R1" },
+  { stepNumber: 7, instruction: "Solder R2 (22.1kΩ) — lower feedback resistor from FB pin to GND. Verify Vout = 5V.", componentId: "R2" },
+];

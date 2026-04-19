@@ -8,6 +8,7 @@ import { SceneComponent } from "@/lib/types";
 
 interface ComponentModelProps extends SceneComponent {
   isSelected: boolean;
+  isHighlighted?: boolean;
   onSelect: (c: SceneComponent) => void;
 }
 
@@ -127,11 +128,10 @@ function ICMesh({ hovered, selected }: { hovered: boolean; selected: boolean }) 
 }
 
 export default function ComponentModel(props: ComponentModelProps) {
-  const { id, type, value, position, reasoning, isSelected, onSelect, ...rest } = props;
+  const { id, type, value, position, reasoning, isSelected, isHighlighted, onSelect, ...rest } = props;
   const [hovered, setHovered] = useState(false);
   const groupRef = useRef<THREE.Group>(null);
 
-  // Rotate resistors to lay flat horizontally
   const groupRotation: [number, number, number] =
     type === "resistor" ? [0, 0, Math.PI / 2] : [0, 0, 0];
 
@@ -148,7 +148,7 @@ export default function ComponentModel(props: ComponentModelProps) {
     onSelect(props);
   };
 
-  const meshProps = { hovered, selected: isSelected };
+  const meshProps = { hovered, selected: isSelected || !!isHighlighted };
 
   const inner = (
     <group

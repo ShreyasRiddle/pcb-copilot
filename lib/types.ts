@@ -38,3 +38,9 @@ export interface PipelineStatus {
   message: string;
   done: boolean;
 }
+
+export interface AssemblyStep {
+  stepNumber: number;
+  instruction: string;
+  componentId: string;
+}
