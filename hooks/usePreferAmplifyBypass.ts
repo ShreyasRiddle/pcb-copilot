@@ -22,5 +22,7 @@ function subscribe(onStoreChange: () => void): () => void {
 
 /** True when user chose in-browser Amplify sign-in instead of Cognito Hosted UI (sessionStorage). */
 export function usePreferAmplifyBypass(): boolean {
-  return useSyncExternalStore(subscribe, readPreferAmplifyBypass, () => false);
+  // Force fallback auth path globally: always use Amplify/email-password flow,
+  // never Hosted UI. Keeps behavior stable across environments.
+  return true;
 }

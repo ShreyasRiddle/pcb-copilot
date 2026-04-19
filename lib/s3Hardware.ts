@@ -23,6 +23,11 @@ export function sourceZipKey(ownerSub: string, projectId: string, revisionId: st
   return `users/${ownerSub}/projects/${projectId}/revisions/${revisionId}/source.zip`;
 }
 
+/** S3 object key for a project revision SKiDL script */
+export function skidlPyKey(ownerSub: string, projectId: string, revisionId: string): string {
+  return `users/${ownerSub}/projects/${projectId}/revisions/${revisionId}/circuit_skidl.py`;
+}
+
 export async function presignedPutZip(
   ownerSub: string,
   projectId: string,
@@ -45,6 +50,17 @@ export async function presignedGetZip(key: string): Promise<string> {
     Key: key,
   });
   return getSignedUrl(client(), cmd, { expiresIn: 3600 });
+}
+
+export async function putObjectText(key: string, text: string, contentType: string): Promise<void> {
+  await client().send(
+    new PutObjectCommand({
+      Bucket: assertHardwareBucket(),
+      Key: key,
+      Body: text,
+      ContentType: contentType,
+    })
+  );
 }
 
 export async function copyObject(sourceKey: string, destKey: string): Promise<void> {

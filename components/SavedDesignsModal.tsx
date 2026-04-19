@@ -97,6 +97,7 @@ export default function SavedDesignsModal({
       const data = (await res.json()) as {
         wiringGraph?: WiringGraph;
         prompt?: string;
+        skidlPy?: string;
         error?: string;
       };
       if (!res.ok || !data.wiringGraph) {

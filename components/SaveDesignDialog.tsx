@@ -10,8 +10,42 @@ interface SaveDesignDialogProps {
   onClose: () => void;
   wiringGraph: WiringGraph;
   prompt: string;
+  skidlPy?: string | null;
   getIdToken: () => Promise<string | null>;
   onSaved?: () => void;
+}
+
+async function generateSkidlScript(wiringGraph: WiringGraph): Promise<string> {
+  const res = await fetch("/api/export-skidl", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ wiringGraph }),
+  });
+  if (!res.ok || !res.body) throw new Error(`SKiDL export failed (HTTP ${res.status})`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let script = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = decoder.decode(value, { stream: true });
+    for (const line of chunk.split("\n")) {
+      if (!line.startsWith("data: ")) continue;
+      const raw = line.slice(6).trim();
+      if (!raw || raw === "[DONE]") continue;
+      try {
+        const event = JSON.parse(raw) as { type?: string; script?: string; error?: string };
+        if (event.type === "result") {
+          if (event.error) throw new Error(event.error);
+          script = event.script ?? "";
+        }
+      } catch {
+        // ignore malformed lines
+      }
+    }
+  }
+  if (!script.trim()) throw new Error("SKiDL export returned an empty script");
+  return script;
 }
 
 export default function SaveDesignDialog({
@@ -19,6 +53,7 @@ export default function SaveDesignDialog({
   onClose,
   wiringGraph,
   prompt,
+  skidlPy,
   getIdToken,
   onSaved,
 }: SaveDesignDialogProps) {
@@ -38,6 +73,10 @@ export default function SaveDesignDialog({
     setBusy(true);
     setError(null);
     try {
+      const py = skidlPy?.trim()
+        ? skidlPy
+        : await generateSkidlScript(wiringGraph);
+
       const res = await fetch("/api/designs", {
         method: "POST",
         headers: {
@@ -48,6 +87,7 @@ export default function SaveDesignDialog({
           title: title.trim() || "Untitled",
           prompt,
           wiringGraph,
+          skidlPy: py,
         }),
       });
       const data = (await res.json()) as { error?: string };
@@ -61,6 +101,7 @@ export default function SaveDesignDialog({
           title: title.trim() || "Untitled",
           prompt,
           wiringGraph,
+          skidlPy: py,
         });
         if (saved) {
           onSaved?.();

@@ -61,6 +61,10 @@ export interface HardwareRevision {
   projectId: string;
   /** Present on stored Dynamo items for auth checks */
   ownerSub?: string;
+  /** What kind of primary source asset is stored at `s3Key`. */
+  sourceKind?: "zip" | "skidl_py";
+  /** Suggested filename for downloads (e.g. circuit_skidl.py). */
+  sourceFilename?: string;
   s3Key: string;
   sizeBytes: number;
   sha256: string;

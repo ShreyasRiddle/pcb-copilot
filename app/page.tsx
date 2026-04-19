@@ -52,6 +52,7 @@ export default function Home() {
   const [skidlState, setSkidlState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [skidlMsg, setSkidlMsg] = useState<string>("");
   const [skidlNetlist, setSkidlNetlist] = useState<string | null>(null);
+  const [skidlScript, setSkidlScript] = useState<string | null>(null);
 
   const {
     loading,
@@ -79,6 +80,7 @@ export default function Home() {
       setSkidlState("idle");
       setSkidlMsg("");
       setSkidlNetlist(null);
+      setSkidlScript(null);
       loadDesign(graph, { prompt });
     },
     [loadDesign]
@@ -91,13 +93,71 @@ export default function Home() {
     [handleLoadSaved]
   );
 
-  const handlePublishToHub = useCallback(
-    (prompt: string) => {
-      stashHardwareHubPrefill(buildHardwareHubPrefill(prompt));
-      router.push("/hardware/new?prefill=1");
-    },
-    [router]
-  );
+  const handlePublishToHub = useCallback(async () => {
+    const token = await getIdToken();
+    if (!token) return;
+    if (!wiringGraph?.nodes?.length) return;
+
+    // Ensure we have a SKiDL script to publish (best-effort: generate if missing).
+    const ensureScript = async (): Promise<string> => {
+      if (skidlScript?.trim()) return skidlScript;
+      const res = await fetch("/api/export-skidl", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wiringGraph }),
+      });
+      if (!res.ok || !res.body) throw new Error(`SKiDL export failed (HTTP ${res.status})`);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let script = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        for (const line of chunk.split("\n")) {
+          if (!line.startsWith("data: ")) continue;
+          const raw = line.slice(6).trim();
+          if (!raw || raw === "[DONE]") continue;
+          try {
+            const event = JSON.parse(raw) as { type?: string; script?: string; error?: string };
+            if (event.type === "result") {
+              if (event.error) throw new Error(event.error);
+              script = event.script ?? "";
+            }
+          } catch {
+            // ignore
+          }
+        }
+      }
+      if (!script.trim()) throw new Error("SKiDL export returned an empty script");
+      setSkidlScript(script);
+      return script;
+    };
+
+    const script = await ensureScript();
+    const prefill = buildHardwareHubPrefill(lastPrompt);
+
+    const res = await fetch("/api/hardware/publish-skidl", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        title: prefill.title,
+        description: prefill.description,
+        readmeMarkdown: prefill.readmeMarkdown,
+        licenseSpdx: "MIT",
+        visibility: "private",
+        wiringGraph,
+        skidlPy: script,
+      }),
+    });
+
+    const data = (await res.json()) as { projectId?: string; error?: string };
+    if (!res.ok || !data.projectId) throw new Error(data.error ?? "Publish failed");
+    router.push(`/hardware/${data.projectId}`);
+  }, [getIdToken, lastPrompt, router, skidlScript, wiringGraph]);
 
   const canPublishHub = Boolean(configured && email);
 
@@ -186,6 +246,7 @@ export default function Home() {
               gotResult = true;
 
               if (event.script) {
+                setSkidlScript(event.script);
                 downloadBlob(event.script, "circuit_skidl.py", "text/x-python");
               }
 
@@ -547,10 +608,10 @@ export default function Home() {
                         disabled={!canPublishHub}
                         title={
                           canPublishHub
-                            ? "Open Hardware hub new project (prefilled); you still upload a KiCad zip"
+                            ? "Publish this design to the Hardware hub (SKiDL .py + wiring graph)"
                             : "Sign in to publish to the Hardware hub"
                         }
-                        onClick={() => handlePublishToHub(lastPrompt)}
+                        onClick={() => void handlePublishToHub()}
                       >
                         Publish to hub…
                       </button>
@@ -758,11 +819,12 @@ export default function Home() {
       ) : null}
 
       {/* ── Sourcing panel — fixed right overlay ──────────────────────── */}
-      <SaveDesignDialog
+              <SaveDesignDialog
         open={saveOpen}
         onClose={() => setSaveOpen(false)}
         wiringGraph={wiringGraph}
         prompt={lastPrompt}
+        skidlPy={skidlScript}
         getIdToken={getIdToken}
       />
 

@@ -37,9 +37,14 @@ export async function GET(
 
   try {
     const url = await presignedGetZip(rev.s3Key);
+    const safeTitle = meta.title.replace(/[^a-z0-9-_]+/gi, "_");
+    const ext = rev.sourceKind === "skidl_py" ? "py" : "zip";
+    const fallbackName = `${safeTitle}_${revisionId.slice(0, 8)}.${ext}`;
     return NextResponse.json({
       url,
-      filename: `${meta.title.replace(/[^a-z0-9-_]+/gi, "_")}_${revisionId.slice(0, 8)}.zip`,
+      filename: rev.sourceFilename
+        ? `${safeTitle}_${revisionId.slice(0, 8)}_${rev.sourceFilename}`
+        : fallbackName,
       sha256: rev.sha256,
     });
   } catch (e) {

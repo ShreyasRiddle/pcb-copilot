@@ -29,13 +29,39 @@ async function buildHardwareWiringGraph(
   const items = hardwareBomLinesToWiringBomItems(bomLines);
   const refs = items.map((i) => i.id);
   let connections: AIConnection[] = [];
-  if (inferConnections && geminiKey && parsed.schTextExcerpt.trim()) {
-    try {
-      connections = await inferKicadConnections(refs, parsed.schTextExcerpt, geminiKey);
-    } catch {
-      connections = [];
+
+  if (inferConnections && geminiKey) {
+    const byKey = new Map<string, AIConnection>();
+
+    // Infer file-by-file so large zips do not overflow a single Gemini prompt.
+    for (const { text } of parsed.schFileExcerpts) {
+      if (!text.trim()) continue;
+      try {
+        const perFile = await inferKicadConnections(refs, text, geminiKey);
+        for (const c of perFile) {
+          const key = `${c.from}|${c.fromPin}|${c.to}|${c.toPin}|${c.net}`;
+          if (!byKey.has(key)) byKey.set(key, c);
+        }
+      } catch {
+        // Keep partial inference from other schematic files.
+      }
     }
+
+    // Backward compatibility for older parse output without schFileExcerpts.
+    if (byKey.size === 0 && parsed.schTextExcerpt.trim()) {
+      try {
+        for (const c of await inferKicadConnections(refs, parsed.schTextExcerpt, geminiKey)) {
+          const key = `${c.from}|${c.fromPin}|${c.to}|${c.toPin}|${c.net}`;
+          if (!byKey.has(key)) byKey.set(key, c);
+        }
+      } catch {
+        // No inferred edges; graph will still be built from BOM nodes.
+      }
+    }
+
+    connections = [...byKey.values()];
   }
+
   return buildWiringGraph(items, connections);
 }
 
@@ -48,6 +74,12 @@ function assertWiringGraphFromBom(
       `${context}: could not build a wiring diagram from schematic symbols. Check .kicad_sch content.`
     );
   }
+}
+
+/** Per-line distributor sourcing is very slow on large BOMs; off by default for reliable finalize. */
+function finalizeBomSourcingEnabled(): boolean {
+  const v = process.env.HARDWARE_FINALIZE_BOM_SOURCING;
+  return v === "1" || v === "true";
 }
 
 /**
@@ -148,6 +180,26 @@ export async function finalizeHardwareRevision(input: {
       analysisStatus: "complete",
       analysisError:
         "GEMINI_API_KEY not set — raw BOM from schematic only (no distributor sourcing or inferred nets).",
+    });
+  }
+
+  if (!finalizeBomSourcingEnabled()) {
+    // Fast path: unzip in memory (parseKicadZip), read .kicad_sch for BOM, infer nets from excerpt, persist.
+    const wiringGraph = await buildHardwareWiringGraph(parsed, parsed.bomLines, true, apiKey);
+    assertWiringGraphFromBom(wiringGraph, "Finalize");
+    return putRevision({
+      projectId: input.projectId,
+      ownerSub: input.ownerSub,
+      revisionId: input.revisionId,
+      s3Key: input.s3Key,
+      sizeBytes: buf.length,
+      sha256: sha,
+      fileManifest: parsed.fileManifest,
+      bomRaw: parsed.bomLines,
+      pcbStats: parsed.pcbStats,
+      bomEnriched: null,
+      wiringGraph,
+      analysisStatus: "complete",
     });
   }
 

@@ -30,6 +30,7 @@ export interface SavedDesignRecord {
   title: string;
   prompt: string;
   wiringGraph: WiringGraph;
+  skidlPy?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -48,7 +49,7 @@ function assertTable(): string {
 
 export async function createDesign(
   userSub: string,
-  input: { title: string; prompt?: string; wiringGraph: WiringGraph }
+  input: { title: string; prompt?: string; wiringGraph: WiringGraph; skidlPy?: string }
 ): Promise<SavedDesignRecord> {
   const designId = randomUUID();
   const now = new Date().toISOString();
@@ -61,6 +62,7 @@ export async function createDesign(
     title: input.title || "Untitled",
     prompt: input.prompt ?? "",
     wiringGraph: JSON.stringify(input.wiringGraph),
+    skidlPy: input.skidlPy ?? null,
     createdAt: now,
     updatedAt: now,
   };
@@ -77,6 +79,7 @@ export async function createDesign(
     title: item.title,
     prompt: item.prompt,
     wiringGraph: input.wiringGraph,
+    skidlPy: input.skidlPy,
     createdAt: now,
     updatedAt: now,
   };
@@ -132,6 +135,7 @@ export async function getDesign(
     title: String(it.title ?? "Untitled"),
     prompt: String(it.prompt ?? ""),
     wiringGraph: graph,
+    skidlPy: it.skidlPy ? String(it.skidlPy) : undefined,
     createdAt: String(it.createdAt ?? ""),
     updatedAt: String(it.updatedAt ?? ""),
   };

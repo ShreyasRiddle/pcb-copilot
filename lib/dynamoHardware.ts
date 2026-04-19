@@ -378,6 +378,8 @@ function revisionFromItem(it: Record<string, unknown>): HardwareRevision {
     revisionId: String(it.revisionId ?? ""),
     projectId: String(it.projectId ?? ""),
     ownerSub: it.ownerSub ? String(it.ownerSub) : undefined,
+    sourceKind: it.sourceKind ? (String(it.sourceKind) as HardwareRevision["sourceKind"]) : undefined,
+    sourceFilename: it.sourceFilename ? String(it.sourceFilename) : undefined,
     s3Key: String(it.s3Key ?? ""),
     sizeBytes: Number(it.sizeBytes ?? 0),
     sha256: String(it.sha256 ?? ""),
@@ -420,6 +422,8 @@ export async function putRevision(input: {
   ownerSub: string;
   /** Must match the revision id used in the S3 upload URL */
   revisionId: string;
+  sourceKind?: HardwareRevision["sourceKind"];
+  sourceFilename?: string;
   s3Key: string;
   sizeBytes: number;
   sha256: string;
@@ -442,6 +446,8 @@ export async function putRevision(input: {
   const rev: HardwareRevision = {
     revisionId,
     projectId: input.projectId,
+    sourceKind: input.sourceKind,
+    sourceFilename: input.sourceFilename,
     s3Key: input.s3Key,
     sizeBytes: input.sizeBytes,
     sha256: input.sha256,
@@ -468,6 +474,8 @@ export async function putRevision(input: {
               ownerSub: input.ownerSub,
               revisionId,
               projectId: input.projectId,
+              sourceKind: input.sourceKind ?? null,
+              sourceFilename: input.sourceFilename ?? null,
               s3Key: input.s3Key,
               sizeBytes: input.sizeBytes,
               sha256: input.sha256,

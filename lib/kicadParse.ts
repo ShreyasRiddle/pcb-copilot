@@ -8,6 +8,7 @@ import type { PcbStats, RawBomLine } from "./hardwareTypes";
 const MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024;
 
 const MAX_SCH_EXCERPT_CHARS = 120_000;
+const MAX_SCH_FILE_EXCERPT_CHARS = 40_000;
 
 export interface KicadParseResult {
   fileManifest: string[];
@@ -17,6 +18,19 @@ export interface KicadParseResult {
   projectFiles: string[];
   /** Concatenated `.kicad_sch` text (capped) for model-assisted net inference. */
   schTextExcerpt: string;
+  /** Individual schematic excerpts (per file) for file-by-file model inference. */
+  schFileExcerpts: { path: string; text: string }[];
+}
+
+
+function buildSchFileExcerpts(parts: { path: string; text: string }[]): { path: string; text: string }[] {
+  return parts.map(({ path, text }) => ({
+    path,
+    text:
+      text.length > MAX_SCH_FILE_EXCERPT_CHARS
+        ? text.slice(0, MAX_SCH_FILE_EXCERPT_CHARS)
+        : text,
+  }));
 }
 
 function buildSchTextExcerpt(parts: { path: string; text: string }[]): string {
@@ -255,5 +269,6 @@ export async function parseKicadZip(buffer: Buffer): Promise<KicadParseResult> {
     pcbStats,
     projectFiles,
     schTextExcerpt: buildSchTextExcerpt(schParts),
+    schFileExcerpts: buildSchFileExcerpts(schParts),
   };
 }

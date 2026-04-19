@@ -29,6 +29,7 @@ export async function GET(
       title: design.title,
       prompt: design.prompt,
       wiringGraph: design.wiringGraph,
+      skidlPy: design.skidlPy,
       createdAt: design.createdAt,
       updatedAt: design.updatedAt,
     });

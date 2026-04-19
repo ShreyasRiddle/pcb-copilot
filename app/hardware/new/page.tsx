@@ -40,6 +40,35 @@ async function readJsonBody<T>(res: Response, step: string): Promise<T> {
   }
 }
 
+function formatS3UploadError(res: Response, bodyText: string): string {
+  const t = bodyText.trim();
+  if (t.startsWith("<?xml") || t.includes("<Error>") || t.includes("</Error>")) {
+    return `S3 rejected the upload (HTTP ${res.status}). Check bucket CORS, object size limits, and that the presigned URL has not expired.`;
+  }
+  if (!t) return `S3 upload failed (HTTP ${res.status}).`;
+  return `S3 upload failed (HTTP ${res.status}). ${t.slice(0, 200)}${t.length > 200 ? "…" : ""}`;
+}
+
+const UPLOAD_STEPS = [
+  { phase: "preview" as const, label: "Validate zip locally" },
+  { phase: "create" as const, label: "Create project" },
+  { phase: "presign" as const, label: "Request upload URL" },
+  { phase: "s3" as const, label: "Upload zip to storage" },
+  {
+    phase: "finalize" as const,
+    label: "Analyze and save (read schematics from zip, BOM + wiring diagram)",
+  },
+] as const;
+
+type UploadPhase = "idle" | (typeof UPLOAD_STEPS)[number]["phase"];
+
+type HubStatusPayload = {
+  cognitoConfigured: boolean;
+  dynamoConfigured: boolean;
+  s3Configured: boolean;
+  uploadPipelineReady: boolean;
+};
+
 export default function NewHardwareProjectPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -51,8 +80,28 @@ export default function NewHardwareProjectPage() {
   const [visibility, setVisibility] = useState<HardwareVisibility>("private");
   const [rights, setRights] = useState(false);
   const [file, setFile] = useState<File | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [uploadPhase, setUploadPhase] = useState<UploadPhase>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [hubStatus, setHubStatus] = useState<HubStatusPayload | null>(null);
+
+  const busy = uploadPhase !== "idle";
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/hardware/hub-status");
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as HubStatusPayload;
+        if (!cancelled) setHubStatus(data);
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (searchParams.get("prefill") !== "1") return;
@@ -89,7 +138,7 @@ export default function NewHardwareProjectPage() {
       return;
     }
 
-    setBusy(true);
+    setUploadPhase("preview");
     try {
       const previewFd = new FormData();
       previewFd.append("file", file);
@@ -115,6 +164,7 @@ export default function NewHardwareProjectPage() {
         );
       }
 
+      setUploadPhase("create");
       const createRes = await fetch("/api/hardware/projects", {
         method: "POST",
         headers: {
@@ -137,6 +187,7 @@ export default function NewHardwareProjectPage() {
       const projectId = createData.id;
       if (!projectId) throw new Error("No project id");
 
+      setUploadPhase("presign");
       const upRes = await fetch(`/api/hardware/projects/${encodeURIComponent(projectId)}/upload`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -150,29 +201,46 @@ export default function NewHardwareProjectPage() {
       const { revisionId, uploadUrl } = upData;
       if (!revisionId || !uploadUrl) throw new Error("Invalid upload response");
 
+      setUploadPhase("s3");
       const buf = await file.arrayBuffer();
       const putRes = await fetch(uploadUrl, {
         method: "PUT",
         body: buf,
         headers: { "Content-Type": "application/zip" },
       });
-      if (!putRes.ok) throw new Error(`S3 upload failed (${putRes.status})`);
+      if (!putRes.ok) {
+        const putBody = await putRes.text();
+        throw new Error(formatS3UploadError(putRes, putBody));
+      }
 
+      setUploadPhase("finalize");
       const sha = await sha256Hex(file);
-      const finRes = await fetch(
-        `/api/hardware/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/finalize`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            sizeBytes: file.size,
-            sha256: sha,
-          }),
+      const finalizeMs = 270_000;
+      let finRes: Response;
+      try {
+        finRes = await fetch(
+          `/api/hardware/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/finalize`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              sizeBytes: file.size,
+              sha256: sha,
+            }),
+            signal: AbortSignal.timeout(finalizeMs),
+          }
+        );
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "TimeoutError") {
+          throw new Error(
+            `Finalize timed out after ${Math.round(finalizeMs / 1000)}s. Large projects with distributor sourcing enabled (HARDWARE_FINALIZE_BOM_SOURCING=1) can exceed this—try again or increase server maxDuration.`
+          );
         }
-      );
+        throw e;
+      }
       const finData = await readJsonBody<{
         revision?: HardwareRevision;
         error?: string;
@@ -195,7 +263,7 @@ export default function NewHardwareProjectPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
     } finally {
-      setBusy(false);
+      setUploadPhase("idle");
     }
   };
 
@@ -204,6 +272,38 @@ export default function NewHardwareProjectPage() {
       <HardwareHubNav />
       <main style={{ background: "var(--bg-base)", minHeight: "100vh", paddingTop: 52 }}>
         <div style={{ maxWidth: 520, margin: "0 auto", padding: "48px 24px 80px" }}>
+          {hubStatus && !hubStatus.uploadPipelineReady ? (
+            <div
+              role="alert"
+              style={{
+                marginBottom: 24,
+                padding: "12px 14px",
+                borderRadius: 10,
+                border: "1px solid rgba(245,158,11,0.35)",
+                background: "rgba(245,158,11,0.08)",
+                color: "#fbbf24",
+                fontSize: 13,
+                lineHeight: 1.55,
+              }}
+            >
+              <strong style={{ display: "block", marginBottom: 6 }}>Zip uploads are not available</strong>
+              {!hubStatus.cognitoConfigured ? (
+                <span>Sign-in is not configured on this server.</span>
+              ) : !hubStatus.dynamoConfigured ? (
+                <span>
+                  Hardware hub database is not configured. Set HARDWARE_TABLE_NAME and AWS credentials for DynamoDB.
+                </span>
+              ) : !hubStatus.s3Configured ? (
+                <span>
+                  S3 is not configured. Set HARDWARE_PROJECTS_BUCKET and grant the server access to that bucket before
+                  uploading projects.
+                </span>
+              ) : (
+                <span>Hardware hub is not ready for uploads.</span>
+              )}
+            </div>
+          ) : null}
+
           <h1
             style={{
               fontSize: 24,
@@ -217,10 +317,69 @@ export default function NewHardwareProjectPage() {
           </h1>
           <p style={{ color: "var(--text-2)", marginBottom: 28, fontSize: 14, lineHeight: 1.6 }}>
             Zip your KiCad project (v6+). We first run a quick local check on your zip (symbols and a
-            component layout from the schematic BOM). After upload, finalize runs full analysis (sourcing
-            and net inference when Gemini is configured). <code>.kicad_pcb</code> is optional for board hints.
+            component layout from the schematic BOM). After upload, the server reads your zip from storage,
+            finds <code>.kicad_sch</code> files, builds the BOM and wiring diagram (net inference when Gemini
+            is configured). Optional per-line distributor sourcing during finalize is off by default for speed
+            (see <code>HARDWARE_FINALIZE_BOM_SOURCING</code> in <code>.env.example</code>).{" "}
+            <code>.kicad_pcb</code> is optional for board hints.
             Max zip size for preview: 50&nbsp;MB.
           </p>
+
+          {busy ? (
+            <div style={{ marginBottom: 22 }}>
+              <p
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                style={{
+                  fontSize: 13,
+                  color: "var(--text-2)",
+                  marginBottom: 12,
+                  fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
+                }}
+              >
+                Step{" "}
+                {UPLOAD_STEPS.findIndex((s) => s.phase === uploadPhase) + 1}{" "}
+                of {UPLOAD_STEPS.length}:{" "}
+                {UPLOAD_STEPS.find((s) => s.phase === uploadPhase)?.label ?? ""}
+              </p>
+              <ol
+                style={{
+                  listStyle: "none",
+                  padding: 0,
+                  margin: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                {UPLOAD_STEPS.map((step, i) => {
+                  const activeIdx = UPLOAD_STEPS.findIndex((s) => s.phase === uploadPhase);
+                  const done = activeIdx > i;
+                  const active = activeIdx === i;
+                  return (
+                    <li
+                      key={step.phase}
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 10,
+                        fontSize: 13,
+                        color: done ? "var(--text-3)" : active ? "var(--accent)" : "var(--text-2)",
+                        fontWeight: active ? 600 : 400,
+                        fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
+                      }}
+                    >
+                      <span aria-hidden style={{ width: 18, flexShrink: 0, textAlign: "center" }}>
+                        {done ? "✓" : active ? "→" : `${i + 1}.`}
+                      </span>
+                      <span>{step.label}</span>
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          ) : null}
 
           <label style={{ display: "block", fontSize: 12, color: "var(--text-2)", marginBottom: 6 }}>Title</label>
           <input
@@ -300,7 +459,8 @@ export default function NewHardwareProjectPage() {
 
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || (hubStatus !== null && !hubStatus.uploadPipelineReady)}
+            aria-busy={busy}
             onClick={() => void submit()}
             style={{
               marginTop: 24,
@@ -310,12 +470,12 @@ export default function NewHardwareProjectPage() {
               background: "rgba(110,231,247,0.12)",
               color: "var(--accent)",
               fontWeight: 600,
-              cursor: busy ? "wait" : "pointer",
+              cursor: busy ? "wait" : hubStatus && !hubStatus.uploadPipelineReady ? "not-allowed" : "pointer",
               fontSize: 14,
               fontFamily: "var(--font-space), system-ui, sans-serif",
             }}
           >
-            {busy ? "Uploading & analyzing…" : "Create & upload"}
+            {busy ? "Working…" : "Create & upload"}
           </button>
         </div>
       </main>

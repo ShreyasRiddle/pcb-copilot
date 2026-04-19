@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyBearerGetSub, isCognitoConfigured } from "@/lib/cognitoVerify";
 import { createProject, listOwnerProjects, listPublicProjects } from "@/lib/dynamoHardware";
 import { hardwareJsonResponse } from "@/lib/hardwareDevError";
-import { hardwareReadReady } from "@/lib/hardwareGate";
+import { hardwareHubReady, hardwareReadReady } from "@/lib/hardwareGate";
 import type { HardwareVisibility } from "@/lib/hardwareTypes";
 
 export async function GET(req: NextRequest) {
@@ -39,9 +39,24 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  if (!hardwareReadReady() || !isCognitoConfigured()) {
+  if (!isCognitoConfigured()) {
+    return NextResponse.json(
+      { error: "Sign-in is not configured on this server." },
+      { status: 503 }
+    );
+  }
+  if (!hardwareReadReady()) {
     return NextResponse.json(
       { error: "Hardware hub is not configured on this server." },
+      { status: 503 }
+    );
+  }
+  if (!hardwareHubReady()) {
+    return NextResponse.json(
+      {
+        error:
+          "Zip uploads require S3. Set HARDWARE_PROJECTS_BUCKET and grant the server AWS credentials access to that bucket.",
+      },
       { status: 503 }
     );
   }

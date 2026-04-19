@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { title?: string; prompt?: string; wiringGraph?: WiringGraph };
+  let body: { title?: string; prompt?: string; wiringGraph?: WiringGraph; skidlPy?: string };
   try {
     body = await req.json();
   } catch {
@@ -52,6 +52,7 @@ export async function POST(req: NextRequest) {
       title: body.title?.trim() || "Untitled",
       prompt: body.prompt,
       wiringGraph: body.wiringGraph,
+      skidlPy: typeof body.skidlPy === "string" ? body.skidlPy : undefined,
     });
     return NextResponse.json(
       {

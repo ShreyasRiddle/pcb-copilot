@@ -12,6 +12,7 @@ export interface LocalDesignRecord {
   title: string;
   prompt: string;
   wiringGraph: WiringGraph;
+  skidlPy?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -67,6 +68,7 @@ export function saveLocalDesign(input: {
   title: string;
   prompt: string;
   wiringGraph: WiringGraph;
+  skidlPy?: string;
 }): LocalDesignRecord | null {
   if (typeof window === "undefined") return null;
   const records = loadRecords();
@@ -80,6 +82,7 @@ export function saveLocalDesign(input: {
     title: input.title,
     prompt: input.prompt,
     wiringGraph: input.wiringGraph,
+    skidlPy: input.skidlPy,
     createdAt: now,
     updatedAt: now,
   };

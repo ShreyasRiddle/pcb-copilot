@@ -51,14 +51,21 @@ function labelFor(line: RawBomLine): string {
 export function hardwareBomLinesToWiringBomItems(
   lines: (RawBomLine & Partial<EnrichedBomLine>)[]
 ): HardwareWiringBomItem[] {
-  return lines.map((line) => {
-    const id = (line.reference || "?").trim() || "?";
-    const type = inferComponentType(line);
+  // Multiple schematic files can legitimately repeat the same reference designator
+  // (e.g. hierarchical sheets or power symbols). The wiring diagram requires unique node ids,
+  // so we dedupe by reference and keep the “best” available info.
+  const byId = new Map<string, HardwareWiringBomItem>();
+  const seenCount = new Map<string, number>();
+
+  for (const line of lines) {
+    const rawId = (line.reference || "?").trim() || "?";
+    const id = rawId;
+    seenCount.set(id, (seenCount.get(id) ?? 0) + 1);
+
     const enriched = line as EnrichedBomLine;
-    const hasPn = Boolean(enriched.partNumber && enriched.partNumber !== "N/A");
-    const item: HardwareWiringBomItem = {
+    const next: HardwareWiringBomItem = {
       id,
-      type,
+      type: inferComponentType(line),
       label: labelFor(line),
       value: line.value || "",
       reasoning: enriched.notes || undefined,
@@ -69,6 +76,33 @@ export function hardwareBomLinesToWiringBomItems(
       inStock: enriched.inStock,
       backordered: enriched.inStock === false,
     };
-    return item;
-  });
+
+    const prev = byId.get(id);
+    if (!prev) {
+      byId.set(id, next);
+      continue;
+    }
+
+    // Prefer entries with richer details (part number / URL / price), otherwise keep the first.
+    const prevScore =
+      (prev.partNumber && prev.partNumber !== "N/A" ? 2 : 0) +
+      (prev.url ? 1 : 0) +
+      (prev.price ? 1 : 0);
+    const nextScore =
+      (next.partNumber && next.partNumber !== "N/A" ? 2 : 0) +
+      (next.url ? 1 : 0) +
+      (next.price ? 1 : 0);
+
+    if (nextScore > prevScore) byId.set(id, next);
+  }
+
+  const out = [...byId.values()];
+  // If a ref appeared multiple times, annotate the label so users understand it was merged.
+  for (const item of out) {
+    const n = seenCount.get(item.id) ?? 1;
+    if (n > 1) {
+      item.label = `${item.label}\n(x${n})`;
+    }
+  }
+  return out;
 }

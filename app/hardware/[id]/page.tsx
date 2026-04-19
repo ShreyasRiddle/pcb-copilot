@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import HardwareHubNav from "@/components/HardwareHubNav";
 import WiringDiagram from "@/components/WiringDiagram";
+import BomTable from "@/components/BomTable";
 import { useCognitoAuth } from "@/hooks/useCognitoAuth";
 import { decodeJwtSub } from "@/lib/decodeJwtSub";
 import type {
@@ -262,7 +263,7 @@ export default function HardwareProjectDetailPage() {
                     style={{ padding: "8px 14px", fontSize: 13 }}
                     onClick={() => void handleDownload().catch((e) => setError(String(e)))}
                   >
-                    Download zip
+                    {revision?.sourceKind === "skidl_py" ? "Download .py" : "Download zip"}
                   </button>
                   <button
                     type="button"
@@ -457,47 +458,15 @@ export default function HardwareProjectDetailPage() {
                   <p style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 12 }}>
                     Sourced from schematic symbols. Verify parts against your footprints and lifecycle.
                   </p>
-                  <div style={{ overflowX: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                      <thead>
-                        <tr style={{ textAlign: "left", borderBottom: "1px solid var(--border)" }}>
-                          <th style={{ padding: "8px 6px" }}>Ref</th>
-                          <th style={{ padding: "8px 6px" }}>Value</th>
-                          <th style={{ padding: "8px 6px" }}>Footprint</th>
-                          <th style={{ padding: "8px 6px" }}>MPN</th>
-                          <th style={{ padding: "8px 6px" }}>Dist.</th>
-                          <th style={{ padding: "8px 6px" }}>Link</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(
-                          (revision?.bomEnriched?.length ? revision.bomEnriched : revision?.bomRaw ?? []) as (
-                            RawBomLine &
-                            Partial<EnrichedBomLine>
-                          )[]
-                        ).map((r, i) => (
-                            <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
-                              <td style={{ padding: "8px 6px", color: "var(--text-1)" }}>{r.reference}</td>
-                              <td style={{ padding: "8px 6px" }}>{r.value}</td>
-                              <td style={{ padding: "8px 6px", color: "var(--text-3)", fontSize: 12 }}>
-                                {r.footprint}
-                              </td>
-                              <td style={{ padding: "8px 6px" }}>{r.partNumber ?? "—"}</td>
-                              <td style={{ padding: "8px 6px" }}>{r.distributor ?? "—"}</td>
-                              <td style={{ padding: "8px 6px" }}>
-                                {r.url ? (
-                                  <a href={r.url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
-                                    Open
-                                  </a>
-                                ) : (
-                                  "—"
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  {revision?.wiringGraph?.nodes?.length ? (
+                    <BomTable nodes={revision.wiringGraph.nodes} />
+                  ) : (
+                    <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.6 }}>
+                      No BOM table yet for this revision. Upload a KiCad zip with a{" "}
+                      <code style={{ color: "var(--accent)" }}>.kicad_sch</code> and finalize again to generate the
+                      wiring graph nodes.
+                    </p>
+                  )}
                 </div>
               )}
 
